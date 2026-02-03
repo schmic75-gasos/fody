@@ -1135,7 +1135,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '(C) <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      attribution: '(C) <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, (C) Fody'
     }).addTo(map);
 
     var photoIcon = L.divIcon({

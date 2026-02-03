@@ -79,6 +79,7 @@ Aplikace komunikuje s Fody API na adrese:
 ```
 https://osm.fit.vutbr.cz/fody/
 ```
+Jako reference byly použity zdrojové soubory původního webového projektu Fody.
 
 ### Dostupné API endpointy:
 
