@@ -17,32 +17,37 @@ Kompletní mobilní klient pro práci s Fody fotodatabází OpenStreetMap CZ.
 
 - Node.js 18+
 - Expo CLI
-- Expo Go aplikace na telefonu (pro testování)
+- Expo Go aplikace na telefonu (pro testování - nepovinné)
 
 ## Instalace a spuštění
 
-### 1. Naklonujte/stáhněte projekt
+### Lokálně
+
+#### 1. Naklonujte/stáhněte projekt
 
 ```bash
 cd fody-app
 ```
 
-### 2. Nainstalujte závislosti
+#### 2. Nainstalujte závislosti
 
 ```bash
 npm install
 ```
 
-### 3. Spusťte vývojový server
+#### 3. Spusťte vývojový server
 
 ```bash
 npx expo start
 ```
 
-### 4. Otevřete v Expo Go
+#### 4. Otevřete v Expo Go
 
 - Naskenujte QR kód v terminálu pomocí aplikace Expo Go (Android) nebo Kamera (iOS)
 - Nebo stiskněte `a` pro Android emulátor / `i` pro iOS simulátor
+
+### Aplikační balíček (APK)
+Můžete si také stáhnout APK soubor ze záložky release a rovnou aplikaci nainstalovat na mobilní telefon s Androidem. Je potřeba potvrdit instalaci z neznámého zdroje. Build (viz. výše) je možné provést i pro iOS.
 
 ## Struktura projektu
 
