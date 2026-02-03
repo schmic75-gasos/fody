@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fody",
     "slug": "fody-app",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -25,21 +25,24 @@
       },
       "package": "cz.osm.fody",
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
-    "web": {
-    },
+    "web": {},
     "plugins": [
       "expo-image-picker",
-      "expo-location"
+      "expo-location",
+      "expo-asset"
     ],
     "extra": {
-     
+      "eas": {
+        "projectId": "9f34eb76-b6b2-43b5-8c3d-564dc8cdeb69"
+      }
     }
   }
 }

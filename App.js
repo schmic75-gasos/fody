@@ -312,7 +312,7 @@ const checkLoginStatus = async () => {
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
       <SafeAreaView style={styles.loginModalContainer}>
         <View style={styles.loginModalHeader}>
-          <Text style={styles.loginModalTitle}>přihláseni pres OSM</Text>
+          <Text style={styles.loginModalTitle}>Přihlášení přes OSM</Text>
           <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
             <Text style={styles.modalCloseText}>{Icons.close}</Text>
           </TouchableOpacity>
@@ -321,7 +321,7 @@ const checkLoginStatus = async () => {
         {loading && (
           <View style={styles.loginLoading}>
             <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loginLoadingText}>Nacitam přihláseni...</Text>
+            <Text style={styles.loginLoadingText}>Načítám přihlášení...</Text>
           </View>
         )}
         
@@ -377,7 +377,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       }
     } catch (error) {
       console.error('Chyba pri nacitani fotek:', error);
-      Alert.alert('Chyba', 'nepodařilo se nacist fotky ze serveru.');
+      Alert.alert('Chyba', 'Nepodařilo se načíst fotky ze serveru.');
     } finally {
       setLoading(false);
     }
@@ -391,6 +391,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       setTags(data);
     } catch (error) {
       console.error('Chyba pri nacitani tagu:', error);
+      Alert.alert('Chyba', 'Nepodařilo se načíst tagy.');
     }
   }, []);
 
@@ -411,6 +412,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       }
     } catch (error) {
       console.error('Chyba pri nacitani statistik:', error);
+      Alert.alert('Chyba', 'Nepodařilo se načíst statistiky.');
     }
   }, []);
 
@@ -462,7 +464,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           <Text style={styles.searchIcon}>{Icons.search}</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Hledat podle ID, autora, tagu..."
+            placeholder="Hledat podle ID, autora, tagů..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor={COLORS.textSecondary}
@@ -494,7 +496,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Nacitam fotky...</Text>
+          <Text style={styles.loadingText}>Načítám fotky...</Text>
         </View>
       ) : (
         <FlatList
@@ -532,7 +534,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyIcon}>{Icons.photo}</Text>
-              <Text style={styles.emptyText}>Zadne fotky k zobrazeni</Text>
+              <Text style={styles.emptyText}>Žádné fotky k zobrazení</Text>
             </View>
           }
         />
@@ -612,7 +614,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
-      Alert.alert('Poloha získana', `${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}`);
+      Alert.alert('Poloha získána', `${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}`);
     };
 
     const uploadPhoto = async () => {
@@ -678,7 +680,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         }
       } catch (error) {
         console.error('Chyba pri nahrávání:', error);
-        Alert.alert('Chyba', 'nepodařilo se nahrát fotku. Zkontrolujte připojení a přihláseni.');
+        Alert.alert('Chyba', 'Nepodařilo se nahrát fotku. Zkontrolujte připojení a přihlášení.');
       } finally {
         setUploading(false);
       }
@@ -733,7 +735,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           )}
 
           <View style={styles.uploadForm}>
-            <Text style={styles.uploadLabel}>{Icons.location} Souradnice</Text>
+            <Text style={styles.uploadLabel}>{Icons.location} Souřadnice</Text>
             <View style={styles.locationRow}>
               <TextInput
                 style={[styles.uploadInput, styles.locationInput]}
@@ -813,10 +815,10 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         <Card style={styles.infoCard}>
           <Text style={styles.infoTitle}>{Icons.info} Informace k nahrávání</Text>
           <Text style={styles.infoText}>
-            {'\u2022'} Fotka musi byt ve formatu JPEG{'\n'}
-            {'\u2022'} Minimalni velikost: 100 KB{'\n'}
+            {'\u2022'} Fotka musí být ve formátu JPEG{'\n'}
+            {'\u2022'} Minimální velikost: 100 KB{'\n'}
             {'\u2022'} Musí obsahovat EXIF datum pořízení{'\n'}
-            {'\u2022'} Pro nahrávání je potřeba přihláseni OSM účtem
+            {'\u2022'} Pro nahrávání je potřeba přihlášení OSM účtem
           </Text>
         </Card>
       </ScrollView>
@@ -1422,7 +1424,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       }
     } catch (error) {
       console.error('Chyba pri nahrávání:', error);
-      Alert.alert('Chyba', 'nepodařilo se nahrát fotku.');
+      Alert.alert('Chyba', 'Nepodařilo se nahrát fotku.');
     } finally {
       setUploading(false);
     }
@@ -1611,7 +1613,7 @@ const MoreTab = () => {
 
   const openLink = (url) => {
     Linking.openURL(url).catch(() => {
-      Alert.alert('Chyba', 'nepodařilo se otevrit odkaz.');
+      Alert.alert('Chyba', 'Nepodařilo se otevřít odkaz.');
     });
   };
 
@@ -1717,24 +1719,24 @@ const MoreTab = () => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.0.1</Text>
+            <Text style={styles.aboutVersion}>Verze 1.0.2</Text>
           </View>
         </View>
         
         <Text style={styles.aboutDescription}>
           Fody je aplikace pro správu a nahrávání fotografií infrastruktury pro projekt OpenStreetMap. 
-          Pomocí této aplikace můžete prohlížet, nahrávat a spravovat fotografie geodetických bodu, 
+          Pomocí této aplikace můžete prohlížet, nahrávat a spravovat fotografie geodetických bodů, 
           veřejné dopravy, památek a dalších objektů zájmu. Zaměřujeme se hlavně na rozcestníky, informační tabule, body záchrany apod.
         </Text>
 
         <View style={styles.aboutFeatures}>
           <Text style={styles.aboutFeatureTitle}>Hlavni funkce:</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Prohlížení fotek z databáze Fody</Text>
-          <Text style={styles.aboutFeature}>{'\u2022'} Nahráváni nových fotografií</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Nahrávání nových fotografií</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Interaktivní mapa s fotkami</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Statistiky a přehledy</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Podpora GPS souřadnic z EXIF</Text>
-          <Text style={styles.aboutFeature}>{'\u2022'} Nahraváni přímo z mapy</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Nahrávání přímo z mapy</Text>
         </View>
 
         <View style={styles.divider} />
@@ -1794,7 +1796,7 @@ export default function App() {
       await fetch(`${AUTH_URL}?logout`, { credentials: 'include' });
       setUser(null);
       setIsLoggedIn(false);
-      Alert.alert('Odhlaseno', 'Byli jste uspesne odhlaseni.');
+      Alert.alert('Odhlášeno', 'Byli jste úspěšně odhlášeni.');
     } catch (error) {
       console.error('Chyba pri odhlaseni:', error);
     }
@@ -1804,7 +1806,7 @@ export default function App() {
     setUser(username);
     setIsLoggedIn(true);
     setLoginModalVisible(false);
-    Alert.alert('přihláseno', `Vitejte, ${username}!`);
+    Alert.alert('Přihlášeno', `Vítejte, ${username}!`);
   };
 
   const navigateToMapUpload = () => {
