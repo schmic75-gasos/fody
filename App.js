@@ -781,7 +781,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
               ))}
             </ScrollView>
 
-            <Text style={styles.uploadLabel}>Reference (cislo, kod)</Text>
+            <Text style={styles.uploadLabel}>Reference (číslo, kód)</Text>
             <TextInput
               style={styles.uploadInput}
               placeholder="napr. 12345"
@@ -790,10 +790,10 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
               placeholderTextColor={COLORS.textSecondary}
             />
 
-            <Text style={styles.uploadLabel}>Poznamka</Text>
+            <Text style={styles.uploadLabel}>Poznámka</Text>
             <TextInput
               style={[styles.uploadInput, styles.uploadTextarea]}
-              placeholder="Volitelny popis..."
+              placeholder="Volitelný popis..."
               value={note}
               onChangeText={setNote}
               multiline
@@ -817,7 +817,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           <Text style={styles.infoText}>
             {'\u2022'} Fotka musí být ve formátu JPEG{'\n'}
             {'\u2022'} Minimální velikost: 100 KB{'\n'}
-            {'\u2022'} Musí obsahovat EXIF datum pořízení{'\n'}
+            {'\u2022'} Musí obsahovat EXIF datum pořízení (TIP: Pokud fotka nemá EXIF data - např. kvůli přeposlání přes WhatsApp, použijte aplikaci "Photo EXIF Editor"){'\n'}
             {'\u2022'} Pro nahrávání je potřeba přihlášení OSM účtem
           </Text>
         </Card>
@@ -844,31 +844,31 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
             color={COLORS.primary}
           />
           <StatCard
-            title="Aktivnich"
+            title="Aktivních"
             value={stats.enabled.toLocaleString()}
             icon={Icons.check}
             color={COLORS.success}
           />
           <StatCard
-            title="Overenych"
+            title="Oveřených"
             value={stats.verified.toLocaleString()}
             icon={Icons.check}
             color={COLORS.secondary}
           />
           <StatCard
-            title="Ceka na overeni"
+            title="Čeká na ověření"
             value={stats.needVerify.toLocaleString()}
             icon={Icons.warning}
             color={COLORS.warning}
           />
           <StatCard
-            title="Zakazanych"
+            title="Zakázaných"
             value={stats.disabled.toLocaleString()}
             icon={Icons.close}
             color={COLORS.error}
           />
           <StatCard
-            title="% overenych"
+            title="% ověřených"
             value={`${((stats.verified / stats.total) * 100).toFixed(1)}%`}
             icon={Icons.stats}
             color={COLORS.accent}
@@ -877,12 +877,12 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       ) : (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Nacitam statistiky...</Text>
+          <Text style={styles.loadingText}>Načítám statistiky...</Text>
         </View>
       )}
 
       {/* Dostupne tagy */}
-      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>{Icons.tag} Dostupne typy objektu</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>{Icons.tag} Dostupné typy objektů</Text>
       <Card style={styles.tagsCard}>
         {tags.map((tag) => (
           <View key={tag.id} style={styles.tagItem}>
@@ -1626,13 +1626,13 @@ const MoreTab = () => {
           <View style={styles.userCardInfo}>
             {isLoggedIn ? (
               <>
-                <Text style={styles.userCardTitle}>přihlášen jako</Text>
+                <Text style={styles.userCardTitle}>Přihlášen jako:</Text>
                 <Text style={styles.userCardName}>{user}</Text>
               </>
             ) : (
               <>
                 <Text style={styles.userCardTitle}>Nepřihlášeno</Text>
-                <Text style={styles.userCardSubtitle}>přihlaste se pro nahrávání</Text>
+                <Text style={styles.userCardSubtitle}>Přihlaste se pro nahrávání</Text>
               </>
             )}
           </View>
@@ -1665,7 +1665,7 @@ const MoreTab = () => {
           <Text style={styles.projectText}>{projectMonth}</Text>
         )}
         <Button
-          title="Zjistit vice"
+          title="Zjistit více"
           variant="outline"
           onPress={() => openLink('https://fluffini.cz/projektmesice.txt')}
           style={{ marginTop: 12 }}
@@ -1719,7 +1719,7 @@ const MoreTab = () => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.0.2</Text>
+            <Text style={styles.aboutVersion}>Verze 1.0.4</Text>
           </View>
         </View>
         
@@ -1745,7 +1745,7 @@ const MoreTab = () => {
           (C) Michal Schneider and OSMCZ, 2026
         </Text>
         <Text style={styles.license}>
-          Licencováno pod GNU GPL v2
+          Licencováno pod GNU GPL v3. Dostupné na GitHubu a GitLabu.
         </Text>
         <Text style={styles.credits}>
           Založeno na Fody API od Tomáše Kašpárka
@@ -1822,9 +1822,9 @@ export default function App() {
         <Header
           title="Fody"
           subtitle={
-            activeTab === 'fody' ? 'Fotodatabaze' :
+            activeTab === 'fody' ? 'Fotodatabáze' :
             activeTab === 'map' ? 'Mapa' :
-            'Vice'
+            'Více'
           }
           rightComponent={
             isLoggedIn ? (
