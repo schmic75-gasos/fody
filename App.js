@@ -299,7 +299,7 @@ const checkLoginStatus = async () => {
       onClose();
     } else {
       console.error('Chyba při přihlášení, status:', response.status);
-      // tady můžeš zobrazit zprávu uživateli podle statusu
+      // tady lze zobrazit zprávu uživateli podle statusu
       // např. 401 = Unauthorized, 403 = Forbidden
     }
   } catch (error) {
@@ -367,7 +367,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
   const [uploading, setUploading] = useState(false);
 
   // Nacteni fotek z API
-  const fetchPhotos = useCallback(async (limit = 50) => {
+  const fetchPhotos = useCallback(async (limit = 160) => {
     try {
       setLoading(true);
       const response = await fetch(`${FODY_API_BASE}/api.php?cmd=show&limit=${limit}`);
@@ -376,7 +376,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         setPhotos(data.features);
       }
     } catch (error) {
-      console.error('Chyba pri nacitani fotek:', error);
+      console.error('Chyba při načitání fotek:', error);
       Alert.alert('Chyba', 'Nepodařilo se načíst fotky ze serveru.');
     } finally {
       setLoading(false);
@@ -390,7 +390,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       const data = await response.json();
       setTags(data);
     } catch (error) {
-      console.error('Chyba pri nacitani tagu:', error);
+      console.error('Chyba při načítání tagů:', error);
       Alert.alert('Chyba', 'Nepodařilo se načíst tagy.');
     }
   }, []);
@@ -411,7 +411,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         });
       }
     } catch (error) {
-      console.error('Chyba pri nacitani statistik:', error);
+      console.error('Chyba při načítání statistik:', error);
       Alert.alert('Chyba', 'Nepodařilo se načíst statistiky.');
     }
   }, []);
@@ -547,7 +547,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
     const pickImage = async () => {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Opravneni', 'Pro nahrani fotek je potreba opravneni ke galerii.');
+        Alert.alert('Oprávnění', 'Pro nahrání fotek je potřeba oprávnění ke galerii.');
         return;
       }
 
@@ -577,7 +577,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
     const takePhoto = async () => {
       const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Opravneni', 'Pro porizeni fotky je potreba opravneni ke kamere.');
+        Alert.alert('Oprávněni', 'Pro pořízení fotky je potřeba oprávnění ke kameře.');
         return;
       }
 
@@ -605,7 +605,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
     const getCurrentLocation = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Opravneni', 'Pro získani polohy je potřeba oprávnění.');
+        Alert.alert('Oprávněni', 'Pro získani polohy je potřeba oprávnění.');
         return;
       }
 
@@ -620,7 +620,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
     const uploadPhoto = async () => {
       if (!isLoggedIn) {
         Alert.alert('přihláseni', 'Pro nahrání fotek je potřeba se přihlásit přes OSM účet.', [
-          { text: 'Zrusit', style: 'cancel' },
+          { text: 'Zrušit', style: 'cancel' },
           { text: 'přihlásit se', onPress: login },
         ]);
         return;
@@ -667,7 +667,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         const result = await response.text();
         
         if (response.ok && result.startsWith('1')) {
-          Alert.alert('Uspech', 'Fotka byla úspěěně nahrána!');
+          Alert.alert('Úspěch', 'Fotka byla úspěšně nahrána!');
           setSelectedImage(null);
           setUploadLocation(null);
           setSelectedTag('');
@@ -679,7 +679,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           Alert.alert('Chyba', `nahrávání selhalo: ${result}`);
         }
       } catch (error) {
-        console.error('Chyba pri nahrávání:', error);
+        console.error('Chyba při nahrávání:', error);
         Alert.alert('Chyba', 'Nepodařilo se nahrát fotku. Zkontrolujte připojení a přihlášení.');
       } finally {
         setUploading(false);
@@ -692,8 +692,8 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         {!isLoggedIn && (
           <Card style={styles.loginPromptCard}>
             <Text style={styles.loginPromptIcon}>{Icons.login}</Text>
-            <Text style={styles.loginPromptTitle}>přihlaste se pro nahrávání</Text>
-            <Text style={styles.loginPromptText}>Pro nahrávání fotek je potřeba přihlášení pres OpenStreetMap účet.</Text>
+            <Text style={styles.loginPromptTitle}>Přihlaste se pro nahrávání</Text>
+            <Text style={styles.loginPromptText}>Pro nahrávání fotek je potřeba přihlášení přes OpenStreetMap účet.</Text>
             <Button
               title="přihlásit se pres OSM"
               icon={Icons.login}
@@ -850,7 +850,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
             color={COLORS.success}
           />
           <StatCard
-            title="Oveřených"
+            title="Ověřených"
             value={stats.verified.toLocaleString()}
             icon={Icons.check}
             color={COLORS.secondary}
