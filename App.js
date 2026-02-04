@@ -6,6 +6,9 @@
  *
  * Kompletni mobilni klient pro praci s Fody API
  * Kompatibilni s Expo Go
+ * 
+ * @version 1.1.0
+ * @license 0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -27,6 +30,8 @@ import {
   FlatList,
   SafeAreaView,
   StatusBar,
+  Animated,
+  Easing,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as ImagePicker from 'expo-image-picker';
@@ -37,7 +42,11 @@ const FODY_API_BASE = 'https://osm.fit.vutbr.cz/fody';
 const AUTH_URL = 'https://osm.fit.vutbr.cz/fody/auth2.php';
 const OSM_MAP_URL = 'https://openstreetmap.cz/#map=11/49.9601/14.2367&layers=dAKVGB';
 const DISCORD_URL = 'https://discord.gg/A9eRVaRzRe';
-const PROJECT_MONTH_URL = 'https://fluffini.cz/projektmesice.txt';
+const PROJECT_MONTH_API_URL = 'https://xn--eicha-hcbb.fun/api/1/project-of-the-month.json';
+const OSM_API_BASE = 'https://api.openstreetmap.org/api/0.6';
+const OSM_NOTES_API = 'https://api.openstreetmap.org/api/0.6/notes';
+const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
+const GITHUB_URL = 'https://github.com/schmic75-gasos/fody';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -58,6 +67,28 @@ const COLORS = {
   border: '#E0E0E0',
   disabled: '#BDBDBD',
   userLocation: '#2196F3',
+  noteOpen: '#FF5722',
+  noteClosed: '#4CAF50',
+};
+
+// Ikony kategorie pro mapu
+const CATEGORY_ICONS = {
+  rozcestnik: '🚶',
+  infotabule: '📋',
+  mapa: '🗺️',
+  zastavka: '🚏',
+  emergency: '🆘',
+  pesi: '🚶',
+  cyklo: '🚴',
+  silnicni: '🚗',
+  konska: '🐎',
+  lyzarska: '⛷️',
+  vozickar: '♿',
+  memorial: '🏛️',
+  panorama: '🌄',
+  zahranicni: '🌍',
+  necitelne: '❓',
+  default: '📍',
 };
 
 // Ikony (SVG jako komponenty nebo Unicode)
@@ -86,6 +117,15 @@ const Icons = {
   tag: '🏷️',
   login: '🔑',
   logout: '🚪',
+  compass: '🧭',
+  note: '📝',
+  noteOpen: '🟠',
+  noteClosed: '🟢',
+  layers: '📚',
+  table: '📊',
+  github: '💻',
+  expand: '⤢',
+  settings: '⚙️',
 };
 
 // ============================================
@@ -97,9 +137,38 @@ const AuthContext = React.createContext({
   isLoggedIn: false,
   login: () => {},
   logout: () => {},
+  osmAccessToken: null,
 });
 
 const useAuth = () => React.useContext(AuthContext);
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+// Parse tagy do kategorie
+const getCategoryFromTags = (tagsString) => {
+  if (!tagsString) return 'default';
+  const tags = tagsString.toLowerCase();
+  for (const [key, icon] of Object.entries(CATEGORY_ICONS)) {
+    if (tags.includes(key)) return key;
+  }
+  return 'default';
+};
+
+// Overpass query builder
+const buildOverpassQuery = (lat, lon, radius = 50) => {
+  return `
+    [out:json][timeout:25];
+    (
+      node(around:${radius},${lat},${lon});
+      way(around:${radius},${lat},${lon});
+    );
+    out body;
+    >;
+    out skel qt;
+  `;
+};
 
 // ============================================
 // KOMPONENTY
@@ -189,7 +258,7 @@ const StatCard = ({ title, value, icon, color }) => (
 );
 
 // Photo Grid Item
-const PhotoGridItem = ({ photo, onPress }) => (
+const PhotoGridItem = ({ photo, onPress, onAuthorPress }) => (
   <TouchableOpacity style={styles.photoGridItem} onPress={() => onPress(photo)} activeOpacity={0.8}>
     <Image
       source={{ uri: `${FODY_API_BASE}/files/250px/${photo.id}.jpg` }}
@@ -202,11 +271,102 @@ const PhotoGridItem = ({ photo, onPress }) => (
   </TouchableOpacity>
 );
 
-// Photo Detail Modal
-const PhotoDetailModal = ({ visible, photo, onClose }) => {
+// OSM Tags Table komponenta
+const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
+  const [tags, setTags] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchOSMTags = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const query = buildOverpassQuery(lat, lon, 30);
+      const response = await fetch(OVERPASS_API, {
+        method: 'POST',
+        body: `data=${encodeURIComponent(query)}`,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      });
+      const data = await response.json();
+      if (data.elements && data.elements.length > 0) {
+        // Najdi nejblizsi prvek s tagy
+        const elementWithTags = data.elements.find(el => el.tags && Object.keys(el.tags).length > 0);
+        if (elementWithTags) {
+          setTags(elementWithTags.tags);
+        } else {
+          setTags({});
+        }
+      } else {
+        setTags({});
+      }
+    } catch (err) {
+      console.error('Error fetching OSM tags:', err);
+      setError('Nepodařilo se načíst OSM tagy');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!visible) return null;
+
+  return (
+    <View style={styles.tagsTableContainer}>
+      <View style={styles.tagsTableHeader}>
+        <Text style={styles.tagsTableTitle}>{Icons.table} OSM Tagy</Text>
+        <TouchableOpacity onPress={onClose}>
+          <Text style={styles.tagsTableClose}>{Icons.close}</Text>
+        </TouchableOpacity>
+      </View>
+      
+      {!tags && !loading && !error && (
+        <Button
+          title="Načíst OSM tagy"
+          icon={Icons.refresh}
+          onPress={fetchOSMTags}
+          variant="outline"
+          style={{ marginVertical: 8 }}
+        />
+      )}
+
+      {loading && (
+        <View style={styles.tagsTableLoading}>
+          <ActivityIndicator color={COLORS.primary} />
+          <Text style={styles.tagsTableLoadingText}>Načítám z Overpass API...</Text>
+        </View>
+      )}
+
+      {error && (
+        <Text style={styles.tagsTableError}>{error}</Text>
+      )}
+
+      {tags && Object.keys(tags).length === 0 && (
+        <Text style={styles.tagsTableEmpty}>Žádné tagy nenalezeny v okolí</Text>
+      )}
+
+      {tags && Object.keys(tags).length > 0 && (
+        <ScrollView style={styles.tagsTableScroll}>
+          {Object.entries(tags).map(([key, value]) => (
+            <View key={key} style={styles.tagsTableRow}>
+              <Text style={styles.tagsTableKey}>{key}</Text>
+              <Text style={styles.tagsTableValue}>{value}</Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+};
+
+// Photo Detail Modal with expanded features
+const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
+  const [showTags, setShowTags] = useState(false);
+
   if (!photo) return null;
   
   const properties = photo.properties || {};
+  const coords = photo.geometry?.coordinates;
   
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -228,7 +388,11 @@ const PhotoDetailModal = ({ visible, photo, onClose }) => {
           <View style={styles.modalInfo}>
             <View style={styles.modalInfoRow}>
               <Text style={styles.modalInfoLabel}>{Icons.user} Autor:</Text>
-              <Text style={styles.modalInfoValue}>{properties.author || 'Neznamy'}</Text>
+              <TouchableOpacity onPress={() => onAuthorPress && onAuthorPress(properties.author)}>
+                <Text style={[styles.modalInfoValue, styles.modalAuthorLink]}>
+                  {properties.author || 'Neznamy'}
+                </Text>
+              </TouchableOpacity>
             </View>
             
             <View style={styles.modalInfoRow}>
@@ -253,8 +417,8 @@ const PhotoDetailModal = ({ visible, photo, onClose }) => {
             <View style={styles.modalInfoRow}>
               <Text style={styles.modalInfoLabel}>{Icons.location} Souradnice:</Text>
               <Text style={styles.modalInfoValue}>
-                {photo.geometry?.coordinates 
-                  ? `${photo.geometry.coordinates[1].toFixed(6)}, ${photo.geometry.coordinates[0].toFixed(6)}`
+                {coords 
+                  ? `${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}`
                   : 'Nezname'}
               </Text>
             </View>
@@ -266,8 +430,122 @@ const PhotoDetailModal = ({ visible, photo, onClose }) => {
                 variant={properties.enabled === 't' || properties.enabled === true ? 'success' : 'warning'} 
               />
             </View>
+
+            {/* OSM Tags section */}
+            {coords && (
+              <View style={styles.osmTagsSection}>
+                <TouchableOpacity 
+                  style={styles.osmTagsToggle}
+                  onPress={() => setShowTags(!showTags)}
+                >
+                  <Text style={styles.osmTagsToggleText}>
+                    {Icons.table} {showTags ? 'Skrýt OSM tagy' : 'Zobrazit OSM tagy'}
+                  </Text>
+                </TouchableOpacity>
+                
+                <OSMTagsTable 
+                  lat={coords[1]} 
+                  lon={coords[0]} 
+                  visible={showTags}
+                  onClose={() => setShowTags(false)}
+                />
+              </View>
+            )}
           </View>
         </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// User Profile Modal - zobrazeni vsech fotek uzivatele
+const UserProfileModal = ({ visible, username, onClose }) => {
+  const [photos, setPhotos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [photoDetailVisible, setPhotoDetailVisible] = useState(false);
+
+  useEffect(() => {
+    if (visible && username) {
+      fetchUserPhotos();
+    }
+  }, [visible, username]);
+
+  const fetchUserPhotos = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${FODY_API_BASE}/api.php?cmd=show&limit=1000`);
+      const data = await response.json();
+      if (data.features) {
+        const userPhotos = data.features.filter(
+          p => p.properties?.author?.toLowerCase() === username?.toLowerCase()
+        );
+        setPhotos(userPhotos);
+      }
+    } catch (error) {
+      console.error('Error fetching user photos:', error);
+      Alert.alert('Chyba', 'Nepodařilo se načíst fotky uživatele.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openPhotoDetail = (photo) => {
+    setSelectedPhoto(photo);
+    setPhotoDetailVisible(true);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{Icons.user} {username}</Text>
+          <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>{Icons.close}</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>Načítám fotky uživatele...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={photos}
+            keyExtractor={(item) => String(item.properties?.id || Math.random())}
+            numColumns={3}
+            renderItem={({ item }) => (
+              <PhotoGridItem 
+                photo={item.properties} 
+                onPress={() => openPhotoDetail(item)} 
+              />
+            )}
+            contentContainerStyle={styles.photoListContainer}
+            ListHeaderComponent={
+              <View style={styles.userProfileStats}>
+                <Text style={styles.userProfileStatsText}>
+                  Celkem fotek: {photos.length}
+                </Text>
+              </View>
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyIcon}>{Icons.photo}</Text>
+                <Text style={styles.emptyText}>Žádné fotky od tohoto uživatele</Text>
+              </View>
+            }
+          />
+        )}
+
+        <PhotoDetailModal
+          visible={photoDetailVisible}
+          photo={selectedPhoto}
+          onClose={() => {
+            setPhotoDetailVisible(false);
+            setSelectedPhoto(null);
+          }}
+        />
       </SafeAreaView>
     </Modal>
   );
@@ -279,34 +557,26 @@ const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
   const [loading, setLoading] = useState(true);
 
   const handleNavigationStateChange = (navState) => {
-    // Kontrola jestli jsme se uspesne přihlásili
-    // auth2.php presmeruje zpet po uspesnem přihláseni
-
-      // Uspesne přihláseni - zkusime ziskat info o uzivateli
-      checkLoginStatus();
-    
+    checkLoginStatus();
   };
 
-const checkLoginStatus = async () => {
-  try {
-    const response = await fetch(`${FODY_API_BASE}/api.php?cmd=logged`, {
-      credentials: 'include',
-    });
+  const checkLoginStatus = async () => {
+    try {
+      const response = await fetch(`${FODY_API_BASE}/api.php?cmd=logged`, {
+        credentials: 'include',
+      });
 
-    if (response.ok) { // response.ok je true, když status je 200–299
-      const text = await response.text(); // pokud potřebuješ obsah
-      onLoginSuccess(text.trim());
-      onClose();
-    } else {
-      console.error('Chyba při přihlášení, status:', response.status);
-      // tady lze zobrazit zprávu uživateli podle statusu
-      // např. 401 = Unauthorized, 403 = Forbidden
+      if (response.ok) {
+        const text = await response.text();
+        onLoginSuccess(text.trim());
+        onClose();
+      } else {
+        console.error('Chyba při přihlášení, status:', response.status);
+      }
+    } catch (error) {
+      console.error('Chyba při kontrole přihlášení:', error);
     }
-  } catch (error) {
-    console.error('Chyba při kontrole přihlášení:', error);
-  }
-};
-
+  };
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
@@ -341,12 +611,168 @@ const checkLoginStatus = async () => {
   );
 };
 
+// OSM Note Add Modal
+const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
+  const [noteText, setNoteText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitNote = async () => {
+    if (!noteText.trim()) {
+      Alert.alert('Chyba', 'Napište text poznámky');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // OSM Notes API - vytvoreni poznamky (nevyzaduje auth pro vytvoreni)
+      const url = `${OSM_NOTES_API}?lat=${location.latitude}&lon=${location.longitude}&text=${encodeURIComponent(noteText)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        Alert.alert('Úspěch', 'Poznámka byla vytvořena');
+        setNoteText('');
+        onSuccess && onSuccess();
+        onClose();
+      } else {
+        const errorText = await response.text();
+        Alert.alert('Chyba', `Nepodařilo se vytvořit poznámku: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Error creating note:', error);
+      Alert.alert('Chyba', 'Nepodařilo se vytvořit poznámku');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" transparent>
+      <View style={styles.noteModalOverlay}>
+        <View style={styles.noteModalContent}>
+          <View style={styles.noteModalHeader}>
+            <Text style={styles.noteModalTitle}>{Icons.note} Nová OSM poznámka</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.noteModalClose}>{Icons.close}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.noteModalLocation}>
+            {Icons.location} {location?.latitude?.toFixed(6)}, {location?.longitude?.toFixed(6)}
+          </Text>
+
+          <TextInput
+            style={styles.noteModalInput}
+            placeholder="Napište poznámku pro mapery OSM..."
+            value={noteText}
+            onChangeText={setNoteText}
+            multiline
+            numberOfLines={4}
+            placeholderTextColor={COLORS.textSecondary}
+          />
+
+          <View style={styles.noteModalInfo}>
+            <Text style={styles.noteModalInfoText}>
+              {Icons.info} Pro vytváření OSM poznámek není potřeba autorizace.
+              Pro správu poznámek (komentáře, uzavření) je nutné přihlášení na osm.org.
+            </Text>
+          </View>
+
+          <View style={styles.noteModalButtons}>
+            <Button
+              title="Zrušit"
+              variant="outline"
+              onPress={onClose}
+              style={{ flex: 1, marginRight: 8 }}
+            />
+            <Button
+              title={submitting ? 'Odesílám...' : 'Vytvořit poznámku'}
+              onPress={submitNote}
+              loading={submitting}
+              disabled={!noteText.trim()}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// Settings Modal for photo limit etc.
+const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
+  const [photoLimit, setPhotoLimit] = useState(String(settings?.photoLimit || 160));
+  const [customTileUrl, setCustomTileUrl] = useState(settings?.customTileUrl || '');
+
+  const saveSettings = () => {
+    const limit = parseInt(photoLimit) || 160;
+    onSettingsChange({
+      photoLimit: Math.max(10, Math.min(1000, limit)),
+      customTileUrl: customTileUrl.trim(),
+    });
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" transparent>
+      <View style={styles.noteModalOverlay}>
+        <View style={styles.noteModalContent}>
+          <View style={styles.noteModalHeader}>
+            <Text style={styles.noteModalTitle}>{Icons.settings} Nastavení</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.noteModalClose}>{Icons.close}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.settingsLabel}>Limit načítání fotek (10-1000)</Text>
+          <TextInput
+            style={styles.settingsInput}
+            value={photoLimit}
+            onChangeText={setPhotoLimit}
+            keyboardType="numeric"
+            placeholder="160"
+            placeholderTextColor={COLORS.textSecondary}
+          />
+
+          <Text style={styles.settingsLabel}>Vlastní mapový podklad (URL)</Text>
+          <TextInput
+            style={[styles.settingsInput, { marginBottom: 8 }]}
+            value={customTileUrl}
+            onChangeText={setCustomTileUrl}
+            placeholder="https://tile.example.com/{z}/{x}/{y}.png"
+            placeholderTextColor={COLORS.textSecondary}
+            autoCapitalize="none"
+          />
+          <Text style={styles.settingsHint}>
+            Nechte prázdné pro výchozí OSM. Použijte {'{z}'}, {'{x}'}, {'{y}'} jako placeholdery.
+          </Text>
+
+          <View style={styles.noteModalButtons}>
+            <Button
+              title="Zrušit"
+              variant="outline"
+              onPress={onClose}
+              style={{ flex: 1, marginRight: 8 }}
+            />
+            <Button
+              title="Uložit"
+              onPress={saveSettings}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 // ============================================
 // HLAVNI OBRAZOVKY
 // ============================================
 
 // FODY TAB - Hlavni funkcionalita
-const FodyTab = ({ onNavigateToMapUpload }) => {
+const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
   const { user, isLoggedIn, login, logout } = useAuth();
   const [photos, setPhotos] = useState([]);
   const [stats, setStats] = useState(null);
@@ -358,6 +784,11 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
   const [viewMode, setViewMode] = useState('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSection, setActiveSection] = useState('browse');
+  const [searchType, setSearchType] = useState('all'); // all, author, tag, ref
+  
+  // User profile modal
+  const [userProfileVisible, setUserProfileVisible] = useState(false);
+  const [selectedUsername, setSelectedUsername] = useState('');
 
   const [selectedImage, setSelectedImage] = useState(null);
   const [uploadLocation, setUploadLocation] = useState(null);
@@ -366,22 +797,87 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  // Infinite loading
+  const [allPhotos, setAllPhotos] = useState([]);
+  const [displayedPhotos, setDisplayedPhotos] = useState([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const photosPerPage = settings?.photoLimit || 160;
+
   // Nacteni fotek z API
-  const fetchPhotos = useCallback(async (limit = 160) => {
+  const fetchPhotos = useCallback(async (limit = 2000) => {
     try {
       setLoading(true);
       const response = await fetch(`${FODY_API_BASE}/api.php?cmd=show&limit=${limit}`);
       const data = await response.json();
       if (data.features) {
-        setPhotos(data.features);
+        setAllPhotos(data.features);
+        setDisplayedPhotos(data.features.slice(0, photosPerPage));
+        setPage(1);
+        setHasMore(data.features.length > photosPerPage);
       }
     } catch (error) {
-      console.error('Chyba při načitání fotek:', error);
+      console.error('Chyba při načítání fotek:', error);
       Alert.alert('Chyba', 'Nepodařilo se načíst fotky ze serveru.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [photosPerPage]);
+
+  // Load more photos (infinite scroll)
+  const loadMorePhotos = () => {
+    if (!hasMore || loading) return;
+    
+    const nextPage = page + 1;
+    const start = nextPage * photosPerPage;
+    const end = start + photosPerPage;
+    
+    const filteredAll = getFilteredPhotos(allPhotos);
+    const newPhotos = filteredAll.slice(0, end);
+    
+    setDisplayedPhotos(newPhotos);
+    setPage(nextPage);
+    setHasMore(end < filteredAll.length);
+  };
+
+  // Filter photos helper
+  const getFilteredPhotos = (photosToFilter) => {
+    if (!searchQuery) return photosToFilter;
+    
+    return photosToFilter.filter(photo => {
+      const props = photo.properties || {};
+      const searchLower = searchQuery.toLowerCase();
+      
+      const id = props.id != null ? String(props.id) : '';
+      const author = props.author != null ? String(props.author).toLowerCase() : '';
+      const tagsStr = props.tags != null ? String(props.tags).toLowerCase() : '';
+      const refStr = props.ref != null ? String(props.ref).toLowerCase() : '';
+      
+      switch (searchType) {
+        case 'author':
+          return author.includes(searchLower);
+        case 'tag':
+          return tagsStr.includes(searchLower);
+        case 'ref':
+          return refStr.includes(searchLower);
+        default:
+          return (
+            id.includes(searchLower) ||
+            author.includes(searchLower) ||
+            tagsStr.includes(searchLower) ||
+            refStr.includes(searchLower)
+          );
+      }
+    });
+  };
+
+  // When search changes, reset displayed photos
+  useEffect(() => {
+    const filtered = getFilteredPhotos(allPhotos);
+    setDisplayedPhotos(filtered.slice(0, photosPerPage));
+    setPage(1);
+    setHasMore(filtered.length > photosPerPage);
+  }, [searchQuery, searchType, allPhotos]);
 
   // Nacteni tagu z API
   const fetchTags = useCallback(async () => {
@@ -391,7 +887,6 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       setTags(data);
     } catch (error) {
       console.error('Chyba při načítání tagů:', error);
-      Alert.alert('Chyba', 'Nepodařilo se načíst tagy.');
     }
   }, []);
 
@@ -412,7 +907,6 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       }
     } catch (error) {
       console.error('Chyba při načítání statistik:', error);
-      Alert.alert('Chyba', 'Nepodařilo se načíst statistiky.');
     }
   }, []);
 
@@ -436,24 +930,13 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
     setModalVisible(true);
   };
 
-  // Filtrovane fotky - OPRAVA: osetrit undefined hodnoty
-  const filteredPhotos = photos.filter(photo => {
-    if (!searchQuery) return true;
-    const props = photo.properties || {};
-    const searchLower = searchQuery.toLowerCase();
-    
-    const id = props.id != null ? String(props.id) : '';
-    const author = props.author != null ? String(props.author).toLowerCase() : '';
-    const tagsStr = props.tags != null ? String(props.tags).toLowerCase() : '';
-    const refStr = props.ref != null ? String(props.ref).toLowerCase() : '';
-    
-    return (
-      id.includes(searchLower) ||
-      author.includes(searchLower) ||
-      tagsStr.includes(searchLower) ||
-      refStr.includes(searchLower)
-    );
-  });
+  // Open user profile
+  const openUserProfile = (username) => {
+    if (username) {
+      setSelectedUsername(username);
+      setUserProfileVisible(true);
+    }
+  };
 
   // Sekce prohlizeni fotek
   const renderBrowseSection = () => (
@@ -464,7 +947,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           <Text style={styles.searchIcon}>{Icons.search}</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Hledat podle ID, autora, tagů..."
+            placeholder="Hledat..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor={COLORS.textSecondary}
@@ -492,6 +975,21 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         </View>
       </View>
 
+      {/* Search type filters */}
+      <View style={styles.filterRow}>
+        {['all', 'author', 'tag', 'ref'].map((type) => (
+          <TouchableOpacity
+            key={type}
+            style={[styles.filterChip, searchType === type && styles.filterChipActive]}
+            onPress={() => setSearchType(type)}
+          >
+            <Text style={[styles.filterChipText, searchType === type && styles.filterChipTextActive]}>
+              {type === 'all' ? 'Vše' : type === 'author' ? 'Autor' : type === 'tag' ? 'Tag' : 'Reference'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {/* Grid/List fotek */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
@@ -500,7 +998,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         </View>
       ) : (
         <FlatList
-          data={filteredPhotos}
+          data={displayedPhotos}
           keyExtractor={(item) => String(item.properties?.id || Math.random())}
           numColumns={viewMode === 'grid' ? 3 : 1}
           key={viewMode}
@@ -518,7 +1016,11 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
                 />
                 <View style={styles.photoListInfo}>
                   <Text style={styles.photoListId}>#{item.properties?.id}</Text>
-                  <Text style={styles.photoListAuthor}>{item.properties?.author || 'Neznamy'}</Text>
+                  <TouchableOpacity onPress={() => openUserProfile(item.properties?.author)}>
+                    <Text style={[styles.photoListAuthor, styles.authorLink]}>
+                      {item.properties?.author || 'Neznamy'}
+                    </Text>
+                  </TouchableOpacity>
                   <Text style={styles.photoListDate}>{item.properties?.created}</Text>
                   {item.properties?.tags && (
                     <Text style={styles.photoListTags} numberOfLines={1}>{item.properties.tags}</Text>
@@ -531,6 +1033,18 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
           }
           contentContainerStyle={styles.photoListContainer}
+          onEndReached={loadMorePhotos}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            hasMore ? (
+              <View style={styles.loadMoreContainer}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.loadMoreText}>Načítám další fotky...</Text>
+              </View>
+            ) : displayedPhotos.length > 0 ? (
+              <Text style={styles.endOfListText}>Všechny fotky načteny ({displayedPhotos.length})</Text>
+            ) : null
+          }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyIcon}>{Icons.photo}</Text>
@@ -561,7 +1075,6 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       if (!result.canceled && result.assets[0]) {
         setSelectedImage(result.assets[0]);
         
-        // Zkusit ziskat GPS z EXIF
         if (result.assets[0].exif) {
           const exif = result.assets[0].exif;
           if (exif.GPSLatitude && exif.GPSLongitude) {
@@ -590,7 +1103,6 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
       if (!result.canceled && result.assets[0]) {
         setSelectedImage(result.assets[0]);
         
-        // Ziskat aktualni polohu
         const locPermission = await Location.requestForegroundPermissionsAsync();
         if (locPermission.granted) {
           const loc = await Location.getCurrentPositionAsync({});
@@ -688,7 +1200,6 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
 
     return (
       <ScrollView style={styles.uploadContainer} contentContainerStyle={styles.uploadContent}>
-        {/* přihláseni */}
         {!isLoggedIn && (
           <Card style={styles.loginPromptCard}>
             <Text style={styles.loginPromptIcon}>{Icons.login}</Text>
@@ -817,7 +1328,7 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           <Text style={styles.infoText}>
             {'\u2022'} Fotka musí být ve formátu JPEG{'\n'}
             {'\u2022'} Minimální velikost: 100 KB{'\n'}
-            {'\u2022'} Musí obsahovat EXIF datum pořízení (TIP: Pokud fotka nemá EXIF data - např. kvůli přeposlání přes WhatsApp, použijte aplikaci "Photo EXIF Editor"){'\n'}
+            {'\u2022'} Musí obsahovat EXIF datum pořízení{'\n'}
             {'\u2022'} Pro nahrávání je potřeba přihlášení OSM účtem
           </Text>
         </Card>
@@ -881,7 +1392,6 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
         </View>
       )}
 
-      {/* Dostupne tagy */}
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>{Icons.tag} Dostupné typy objektů</Text>
       <Card style={styles.tagsCard}>
         {tags.map((tag) => (
@@ -949,13 +1459,24 @@ const FodyTab = ({ onNavigateToMapUpload }) => {
           setModalVisible(false);
           setSelectedPhoto(null);
         }}
+        onAuthorPress={openUserProfile}
+      />
+
+      {/* User profile modal */}
+      <UserProfileModal
+        visible={userProfileVisible}
+        username={selectedUsername}
+        onClose={() => {
+          setUserProfileVisible(false);
+          setSelectedUsername('');
+        }}
       />
     </View>
   );
 };
 
 // MAPA TAB - OSM mapa s moznosti nahrávání, polohou uzivatele a rozcesniky
-const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadComplete }) => {
+const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadComplete, settings }) => {
   const { isLoggedIn, login } = useAuth();
   const webViewRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -965,6 +1486,17 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   const [userLocation, setUserLocation] = useState(null);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [selectedMarkerInfo, setSelectedMarkerInfo] = useState(null);
+  const [osmNotes, setOsmNotes] = useState([]);
+  const [showNotes, setShowNotes] = useState(true);
+  const [mapBearing, setMapBearing] = useState(0);
+  
+  // Note modal
+  const [addNoteModalVisible, setAddNoteModalVisible] = useState(false);
+  const [noteLocation, setNoteLocation] = useState(null);
+  
+  // Extended popup modal
+  const [extendedPopupVisible, setExtendedPopupVisible] = useState(false);
+  const [extendedPopupData, setExtendedPopupData] = useState(null);
   
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -975,11 +1507,24 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  // Animation for "My Location" button
+  const flyAnimation = useRef(new Animated.Value(0)).current;
+
+  // Custom tile URL
+  const customTileUrl = settings?.customTileUrl || '';
+
   useEffect(() => {
-    fetchPhotosForMap();
     fetchTags();
     getUserLocation();
   }, []);
+
+  // Load photos immediately after map loads
+  useEffect(() => {
+    if (mapLoaded) {
+      fetchPhotosForMap();
+      fetchOSMNotes();
+    }
+  }, [mapLoaded]);
 
   useEffect(() => {
     if (externalUploadMode !== undefined) {
@@ -1000,7 +1545,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           longitude: location.coords.longitude,
         });
         
-        // Poslat polohu do mapy
         if (webViewRef.current && mapLoaded) {
           webViewRef.current.injectJavaScript(`
             window.setUserLocation(${location.coords.latitude}, ${location.coords.longitude});
@@ -1025,7 +1569,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       if (data.features) {
         setPhotos(data.features);
         
-        // Poslat fotky do mapy
         if (webViewRef.current && mapLoaded) {
           webViewRef.current.injectJavaScript(`
             window.updatePhotos(${JSON.stringify(data.features)});
@@ -1040,6 +1583,31 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     }
   };
 
+  const fetchOSMNotes = async (bounds = null) => {
+    try {
+      let url = `${OSM_NOTES_API}.json?limit=100`;
+      if (bounds) {
+        url += `&bbox=${bounds.west},${bounds.south},${bounds.east},${bounds.north}`;
+      } else {
+        // Default area - Prague
+        url += `&bbox=14.0,49.8,14.8,50.2`;
+      }
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.features) {
+        setOsmNotes(data.features);
+        if (webViewRef.current && mapLoaded) {
+          webViewRef.current.injectJavaScript(`
+            window.updateOSMNotes(${JSON.stringify(data.features)});
+            true;
+          `);
+        }
+      }
+    } catch (error) {
+      console.error('Chyba pri nacitani OSM notes:', error);
+    }
+  };
+
   const fetchTags = async () => {
     try {
       const response = await fetch(`${FODY_API_BASE}/api.php?cmd=tags`);
@@ -1050,25 +1618,80 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     }
   };
 
-  // HTML pro Leaflet mapu s polohou uzivatele a rozcesniky
+  // Animated fly to user location
+  const flyToUserLocation = () => {
+    if (!userLocation) {
+      Alert.alert('Poloha', 'Poloha není dostupná. Zkuste to znovu.');
+      getUserLocation();
+      return;
+    }
+
+    // Start animation
+    Animated.sequence([
+      Animated.timing(flyAnimation, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(flyAnimation, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Fly to location with smooth animation
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        map.flyTo([${userLocation.latitude}, ${userLocation.longitude}], 16, {
+          animate: true,
+          duration: 1.5
+        });
+        true;
+      `);
+    }
+  };
+
+  // Rotate map (compass)
+  const rotateMap = (bearing) => {
+    setMapBearing(bearing);
+    if (webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        map.setBearing(${bearing});
+        true;
+      `);
+    }
+  };
+
+  // Reset map rotation
+  const resetMapRotation = () => {
+    rotateMap(0);
+  };
+
+  // HTML pro Leaflet mapu s rozsirenymi funkcemi
+  const tileUrl = customTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  
   const mapHTML = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; }
     #map { width: 100%; height: 100%; }
     .photo-marker {
-      width: 24px;
-      height: 24px;
-      background: #2E7D32;
-      border: 2px solid white;
-      border-radius: 50%;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     .user-marker {
       width: 20px;
@@ -1101,10 +1724,36 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       box-shadow: 0 2px 6px rgba(0,0,0,0.4);
       cursor: crosshair;
     }
+    .note-marker-open {
+      width: 24px;
+      height: 24px;
+      background: #FF5722;
+      border: 2px solid white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: white;
+      font-weight: bold;
+    }
+    .note-marker-closed {
+      width: 24px;
+      height: 24px;
+      background: #4CAF50;
+      border: 2px solid white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: white;
+      font-weight: bold;
+    }
     .leaflet-popup-content {
       margin: 8px;
       text-align: center;
-      min-width: 180px;
+      min-width: 200px;
     }
     .leaflet-popup-content img {
       max-width: 200px;
@@ -1126,23 +1775,53 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       margin-top: 4px;
       font-style: italic;
     }
+    .popup-expand-btn {
+      margin-top: 8px;
+      padding: 6px 12px;
+      background: #2E7D32;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .popup-note-btn {
+      margin-top: 4px;
+      padding: 6px 12px;
+      background: #FF5722;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    var map = L.map('map').setView([49.9601, 14.2367], 11);
+    var map = L.map('map', {
+      rotate: true,
+      rotateControl: false,
+      touchRotate: true,
+    }).setView([49.9601, 14.2367], 11);
     
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    var currentTileLayer = L.tileLayer('${tileUrl}', {
       maxZoom: 19,
-      attribution: '(C) <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, (C) Fody'
+      attribution: '(C) <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, Fody'
     }).addTo(map);
 
-    var photoIcon = L.divIcon({
-      className: 'photo-marker',
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
-    });
+    // Category icons
+    var categoryIcons = ${JSON.stringify(CATEGORY_ICONS)};
+
+    function getCategoryIcon(tags) {
+      if (!tags) return categoryIcons.default;
+      var tagsLower = tags.toLowerCase();
+      for (var key in categoryIcons) {
+        if (tagsLower.indexOf(key) !== -1) return categoryIcons[key];
+      }
+      return categoryIcons.default;
+    }
 
     var userIcon = L.divIcon({
       className: '',
@@ -1161,27 +1840,37 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     var userMarker = null;
     var uploadMode = false;
     var photoMarkers = [];
+    var noteMarkers = [];
 
-    // Funkce pro aktualizaci fotek na mape
+    // Funkce pro aktualizaci fotek na mape s kategorizovanymi ikonami
     window.updatePhotos = function(photos) {
-      // Odstranit stare markery
       photoMarkers.forEach(function(marker) {
         map.removeLayer(marker);
       });
       photoMarkers = [];
       
-      // Pridat nove markery
       photos.forEach(function(photo) {
         if (photo.geometry && photo.geometry.coordinates) {
           var coords = [photo.geometry.coordinates[1], photo.geometry.coordinates[0]];
-          var marker = L.marker(coords, { icon: photoIcon }).addTo(map);
           var props = photo.properties || {};
+          var icon = getCategoryIcon(props.tags);
+          
+          var photoIcon = L.divIcon({
+            className: 'photo-marker',
+            html: icon,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+          });
+          
+          var marker = L.marker(coords, { icon: photoIcon }).addTo(map);
           
           var popupContent = '<div class="popup-title">#' + props.id + '</div>' +
             '<img src="https://osm.fit.vutbr.cz/fody/files/250px/' + props.id + '.jpg" onerror="this.style.display=\\'none\\'" />' +
-            '<div class="popup-info">' + (props.author || 'Neznamy') + '</div>' +
+            '<div class="popup-info"><b>' + (props.author || 'Neznamy') + '</b></div>' +
             '<div class="popup-info">' + (props.created || '') + '</div>' +
-            (props.tags ? '<div class="popup-tags">' + props.tags + '</div>' : '');
+            (props.tags ? '<div class="popup-tags">' + props.tags + '</div>' : '') +
+            '<button class="popup-expand-btn" onclick="window.expandPopup(' + props.id + ')">Vice info</button>' +
+            '<button class="popup-note-btn" onclick="window.addNoteAt(' + coords[0] + ',' + coords[1] + ')">Pridat poznamku</button>';
           
           marker.bindPopup(popupContent);
           
@@ -1197,7 +1886,54 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       });
     };
 
-    // Nastaveni polohy uzivatele
+    // OSM Notes
+    window.updateOSMNotes = function(notes) {
+      noteMarkers.forEach(function(marker) {
+        map.removeLayer(marker);
+      });
+      noteMarkers = [];
+      
+      notes.forEach(function(note) {
+        if (note.geometry && note.geometry.coordinates) {
+          var coords = [note.geometry.coordinates[1], note.geometry.coordinates[0]];
+          var props = note.properties || {};
+          var isOpen = props.status === 'open';
+          
+          var noteIcon = L.divIcon({
+            className: isOpen ? 'note-marker-open' : 'note-marker-closed',
+            html: isOpen ? '!' : '✓',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+          
+          var marker = L.marker(coords, { icon: noteIcon }).addTo(map);
+          
+          var firstComment = props.comments && props.comments[0] ? props.comments[0].text : 'Bez popisu';
+          var popupContent = '<div class="popup-title">OSM Note #' + props.id + '</div>' +
+            '<div class="popup-info">Stav: ' + (isOpen ? 'Otevrena' : 'Uzavrena') + '</div>' +
+            '<div class="popup-tags">' + firstComment.substring(0, 100) + (firstComment.length > 100 ? '...' : '') + '</div>';
+          
+          marker.bindPopup(popupContent);
+          noteMarkers.push(marker);
+        }
+      });
+    };
+
+    window.expandPopup = function(id) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'expandPopup',
+        photoId: id
+      }));
+    };
+
+    window.addNoteAt = function(lat, lon) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'addNote',
+        lat: lat,
+        lon: lon
+      }));
+    };
+
     window.setUserLocation = function(lat, lon) {
       if (userMarker) {
         map.removeLayer(userMarker);
@@ -1206,14 +1942,24 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       userMarker.bindPopup('<b>Vase poloha</b>');
     };
 
-    // Centrovani na polohu uzivatele
     window.centerOnUser = function() {
       if (userMarker) {
-        map.setView(userMarker.getLatLng(), 15);
+        map.flyTo(userMarker.getLatLng(), 16, { animate: true, duration: 1.5 });
       }
     };
 
-    // Klik na mapu pro nahrani
+    window.setBearing = function(bearing) {
+      map.setBearing(bearing);
+    };
+
+    window.setTileLayer = function(url) {
+      map.removeLayer(currentTileLayer);
+      currentTileLayer = L.tileLayer(url, {
+        maxZoom: 19,
+        attribution: '(C) OpenStreetMap'
+      }).addTo(map);
+    };
+
     map.on('click', function(e) {
       if (uploadMode) {
         if (uploadMarker) {
@@ -1228,7 +1974,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       }
     });
 
-    // Nacitani fotek pri posunu mapy
     var loadTimeout = null;
     map.on('moveend', function() {
       clearTimeout(loadTimeout);
@@ -1246,7 +1991,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       }, 500);
     });
 
-    // Funkce pro prepnuti rezimu nahrávání
     window.setUploadMode = function(mode) {
       uploadMode = mode;
       if (!mode && uploadMarker) {
@@ -1255,8 +1999,22 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       }
     };
 
-    // Inicialni nacteni
+    // Initial load
     window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapLoaded' }));
+    
+    // Trigger initial bounds for loading photos
+    setTimeout(function() {
+      var bounds = map.getBounds();
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'boundsChanged',
+        bounds: {
+          north: bounds.getNorth(),
+          south: bounds.getSouth(),
+          east: bounds.getEast(),
+          west: bounds.getWest()
+        }
+      }));
+    }, 500);
   </script>
 </body>
 </html>
@@ -1268,27 +2026,30 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       
       if (data.type === 'mapLoaded') {
         setMapLoaded(true);
-        // Poslat polohu uzivatele pokud ji mame
         if (userLocation) {
           webViewRef.current?.injectJavaScript(`
             window.setUserLocation(${userLocation.latitude}, ${userLocation.longitude});
             true;
           `);
         }
-        // Nacist fotky
-        fetchPhotosForMap();
       } else if (data.type === 'locationSelected') {
         setSelectedLocation({ latitude: data.lat, longitude: data.lon });
         
         if (onLocationSelected) {
           onLocationSelected({ latitude: data.lat, longitude: data.lon });
         } else {
-          // Zobrazit dialog pro nahrani přímo z mapy
           Alert.alert(
             'Poloha vybrana',
             `Lat: ${data.lat.toFixed(6)}\nLon: ${data.lon.toFixed(6)}`,
             [
               { text: 'Zrusit', style: 'cancel' },
+              { 
+                text: 'Pridat OSM poznamku',
+                onPress: () => {
+                  setNoteLocation({ latitude: data.lat, longitude: data.lon });
+                  setAddNoteModalVisible(true);
+                }
+              },
               { 
                 text: 'Nahrát fotku zde', 
                 onPress: () => {
@@ -1306,10 +2067,20 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           );
         }
       } else if (data.type === 'boundsChanged') {
-        // Nacist fotky pro novou oblast (na pozadi)
         fetchPhotosForMap(data.bounds);
+        fetchOSMNotes(data.bounds);
       } else if (data.type === 'markerClick') {
         setSelectedMarkerInfo(data.photo);
+      } else if (data.type === 'expandPopup') {
+        // Find photo and show extended popup
+        const photo = photos.find(p => p.properties?.id === data.photoId);
+        if (photo) {
+          setExtendedPopupData(photo);
+          setExtendedPopupVisible(true);
+        }
+      } else if (data.type === 'addNote') {
+        setNoteLocation({ latitude: data.lat, longitude: data.lon });
+        setAddNoteModalVisible(true);
       }
     } catch (e) {
       console.error('Error parsing message:', e);
@@ -1321,12 +2092,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     setUploadMode(newMode);
     if (webViewRef.current) {
       webViewRef.current.injectJavaScript(`window.setUploadMode(${newMode}); true;`);
-    }
-  };
-
-  const centerOnUserLocation = () => {
-    if (webViewRef.current) {
-      webViewRef.current.injectJavaScript(`window.centerOnUser(); true;`);
     }
   };
 
@@ -1430,6 +2195,12 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     }
   };
 
+  // Animation interpolation for fly button
+  const flyButtonScale = flyAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.2],
+  });
+
   return (
     <View style={styles.mapContainer}>
       <WebView
@@ -1442,7 +2213,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         scalesPageToFit={true}
       />
       
-      {/* Ovladani mapy */}
+      {/* Map controls */}
       <View style={styles.mapControls}>
         <TouchableOpacity
           style={[styles.mapControlBtn, uploadMode && styles.mapControlBtnActive]}
@@ -1450,31 +2221,50 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         >
           <Text style={styles.mapControlIcon}>{uploadMode ? Icons.close : Icons.camera}</Text>
           <Text style={[styles.mapControlText, uploadMode && styles.mapControlTextActive]}>
-            {uploadMode ? 'Zrusit' : 'Nahrát zde'}
+            {uploadMode ? 'Zrusit' : 'Nahrát'}
           </Text>
         </TouchableOpacity>
         
-        <TouchableOpacity
-          style={styles.mapControlBtn}
-          onPress={centerOnUserLocation}
-        >
-          <Text style={styles.mapControlIcon}>{Icons.location}</Text>
-          <Text style={styles.mapControlText}>Moje poloha</Text>
-        </TouchableOpacity>
+        <Animated.View style={{ transform: [{ scale: flyButtonScale }] }}>
+          <TouchableOpacity
+            style={styles.mapControlBtn}
+            onPress={flyToUserLocation}
+          >
+            <Text style={styles.mapControlIcon}>{Icons.location}</Text>
+            <Text style={styles.mapControlText}>Moje poloha</Text>
+          </TouchableOpacity>
+        </Animated.View>
         
         <TouchableOpacity
-          style={styles.mapControlBtn}
-          onPress={() => Linking.openURL(OSM_MAP_URL)}
+          style={[styles.mapControlBtn, mapBearing !== 0 && styles.mapControlBtnActive]}
+          onPress={resetMapRotation}
         >
-          <Text style={styles.mapControlIcon}>{Icons.web}</Text>
-          <Text style={styles.mapControlText}>OSM.cz</Text>
+          <Text style={[styles.mapControlIcon, { transform: [{ rotate: `${-mapBearing}deg` }] }]}>
+            {Icons.compass}
+          </Text>
+          <Text style={styles.mapControlText}>Kompas</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.mapControlBtn}
+          onPress={() => {
+            if (userLocation) {
+              setNoteLocation(userLocation);
+              setAddNoteModalVisible(true);
+            } else {
+              Alert.alert('Poloha', 'Nejprve povolte přístup k poloze');
+            }
+          }}
+        >
+          <Text style={styles.mapControlIcon}>{Icons.note}</Text>
+          <Text style={styles.mapControlText}>Poznámka</Text>
         </TouchableOpacity>
       </View>
 
       {uploadMode && (
         <View style={styles.uploadModeOverlay}>
           <Text style={styles.uploadModeText}>
-            {Icons.location} Klikněte na mapu pro výběr pozice nahrání
+            {Icons.location} Klikněte na mapu pro výběr pozice
           </Text>
         </View>
       )}
@@ -1492,7 +2282,25 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         </View>
       )}
 
-      {/* Upload Modal přímo z mapy */}
+      {/* Add OSM Note Modal */}
+      <AddOSMNoteModal
+        visible={addNoteModalVisible}
+        location={noteLocation}
+        onClose={() => setAddNoteModalVisible(false)}
+        onSuccess={() => fetchOSMNotes()}
+      />
+
+      {/* Extended Popup Modal */}
+      <PhotoDetailModal
+        visible={extendedPopupVisible}
+        photo={extendedPopupData}
+        onClose={() => {
+          setExtendedPopupVisible(false);
+          setExtendedPopupData(null);
+        }}
+      />
+
+      {/* Upload Modal */}
       <Modal visible={showUploadModal} animationType="slide" presentationStyle="pageSheet">
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
@@ -1589,10 +2397,11 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
 };
 
 // VICE TAB - Info, odkazy, projekt mesice
-const MoreTab = () => {
+const MoreTab = ({ settings, onSettingsChange }) => {
   const { user, isLoggedIn, login, logout } = useAuth();
-  const [projectMonth, setProjectMonth] = useState('Nacitam...');
+  const [projectMonth, setProjectMonth] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
 
   useEffect(() => {
     fetchProjectMonth();
@@ -1600,12 +2409,12 @@ const MoreTab = () => {
 
   const fetchProjectMonth = async () => {
     try {
-      const response = await fetch(PROJECT_MONTH_URL);
-      const text = await response.text();
-      setProjectMonth(text.trim() || 'Momentalne není aktivní projekt čtvrtletí.');
+      const response = await fetch(PROJECT_MONTH_API_URL);
+      const data = await response.json();
+      setProjectMonth(data);
     } catch (error) {
-      console.error('Chyba pri načítáni projektu čtvrtletí:', error);
-      setProjectMonth('nepodařilo se načíst aktuální projekt čtvrtletí.');
+      console.error('Chyba pri načítáni projektu období:', error);
+      setProjectMonth(null);
     } finally {
       setLoading(false);
     }
@@ -1615,6 +2424,15 @@ const MoreTab = () => {
     Linking.openURL(url).catch(() => {
       Alert.alert('Chyba', 'Nepodařilo se otevřít odkaz.');
     });
+  };
+
+  const getProjectTypeLabel = (type) => {
+    switch (type) {
+      case 'maproulette': return 'MapRoulette';
+      case 'osm': return 'OpenStreetMap';
+      case 'wiki': return 'Wiki';
+      default: return type || 'Projekt';
+    }
   };
 
   return (
@@ -1653,28 +2471,67 @@ const MoreTab = () => {
         )}
       </Card>
 
-      {/* Projekt ctvrtleti */}
+      {/* Projekt obdobi - now from API */}
       <Card style={styles.projectCard}>
         <View style={styles.projectHeader}>
           <Text style={styles.projectIcon}>{Icons.calendar}</Text>
-          <Text style={styles.projectTitle}>Projekt čtvrtletí</Text>
+          <Text style={styles.projectTitle}>Projekt období</Text>
         </View>
         {loading ? (
           <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 16 }} />
+        ) : projectMonth ? (
+          <View>
+            <Text style={styles.projectText}>{projectMonth.name}</Text>
+            <View style={styles.projectMeta}>
+              <Badge text={getProjectTypeLabel(projectMonth.type)} variant="info" />
+              <Text style={styles.projectDate}>
+                {projectMonth.month}/{projectMonth.year}
+              </Text>
+            </View>
+            {projectMonth.progress !== undefined && (
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${Math.min(100, projectMonth.progress)}%` }]} />
+                </View>
+                <Text style={styles.progressText}>{projectMonth.progress.toFixed(1)}% hotovo</Text>
+              </View>
+            )}
+            {projectMonth.link && (
+              <Button
+                title="Otevřít projekt"
+                variant="outline"
+                onPress={() => openLink(projectMonth.link)}
+                style={{ marginTop: 12 }}
+              />
+            )}
+          </View>
         ) : (
-          <Text style={styles.projectText}>{projectMonth}</Text>
+          <Text style={styles.projectText}>Nepodařilo se načíst aktuální projekt.</Text>
         )}
-        <Button
-          title="Zjistit více"
-          variant="outline"
-          onPress={() => openLink('https://fluffini.cz/projektmesice.txt')}
-          style={{ marginTop: 12 }}
-        />
+      </Card>
+
+      {/* Nastaveni */}
+      <Card style={styles.linkCard} onPress={() => setSettingsModalVisible(true)}>
+        <Text style={styles.linkIcon}>{Icons.settings}</Text>
+        <View style={styles.linkContent}>
+          <Text style={styles.linkTitle}>Nastavení</Text>
+          <Text style={styles.linkSubtitle}>Limit fotek, mapový podklad</Text>
+        </View>
+        <Text style={styles.linkArrow}>{Icons.forward}</Text>
       </Card>
 
       {/* Odkazy */}
       <Text style={styles.sectionHeader}>{Icons.web} Užitečné odkazy</Text>
       
+      <Card style={styles.linkCard} onPress={() => openLink(GITHUB_URL)}>
+        <Text style={styles.linkIcon}>{Icons.github}</Text>
+        <View style={styles.linkContent}>
+          <Text style={styles.linkTitle}>GitHub</Text>
+          <Text style={styles.linkSubtitle}>Zdrojový kód aplikace</Text>
+        </View>
+        <Text style={styles.linkArrow}>{Icons.forward}</Text>
+      </Card>
+
       <Card style={styles.linkCard} onPress={() => openLink(DISCORD_URL)}>
         <Text style={styles.linkIcon}>{Icons.discord}</Text>
         <View style={styles.linkContent}>
@@ -1719,24 +2576,28 @@ const MoreTab = () => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.0.4</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.0</Text>
           </View>
         </View>
         
         <Text style={styles.aboutDescription}>
           Fody je aplikace pro správu a nahrávání fotografií infrastruktury pro projekt OpenStreetMap. 
-          Pomocí této aplikace můžete prohlížet, nahrávat a spravovat fotografie geodetických bodů, 
-          veřejné dopravy, památek a dalších objektů zájmu. Zaměřujeme se hlavně na rozcestníky, informační tabule, body záchrany apod.
+          Pomocí této aplikace můžete prohlížet, nahrávat a spravovat fotografie rozcestníků, 
+          informačních tabulí, bodů záchrany a dalších objektů.
         </Text>
 
         <View style={styles.aboutFeatures}>
           <Text style={styles.aboutFeatureTitle}>Hlavni funkce:</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Prohlížení fotek z databáze Fody</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Nekonečné načítání fotek</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Profily uživatelů</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Nahrávání nových fotografií</Text>
-          <Text style={styles.aboutFeature}>{'\u2022'} Interaktivní mapa s fotkami</Text>
-          <Text style={styles.aboutFeature}>{'\u2022'} Statistiky a přehledy</Text>
-          <Text style={styles.aboutFeature}>{'\u2022'} Podpora GPS souřadnic z EXIF</Text>
-          <Text style={styles.aboutFeature}>{'\u2022'} Nahrávání přímo z mapy</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Interaktivní mapa s kategorizovanými ikonami</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} OSM poznámky na mapě</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Kompas pro otáčení mapy</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Vlastní mapové podklady</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} OSM tagy z Overpass API</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Projekt období z API</Text>
         </View>
 
         <View style={styles.divider} />
@@ -1745,11 +2606,19 @@ const MoreTab = () => {
           (C) Michal Schneider and OSMCZ, 2026
         </Text>
         <Text style={styles.license}>
-          Licencováno pod GNU GPL v3. Dostupné na GitHubu a GitLabu.
+          0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
         </Text>
         <Text style={styles.credits}>
           Založeno na Fody API od Tomáše Kašpárka
         </Text>
+        
+        <Button
+          title="Zdrojový kód na GitHubu"
+          icon={Icons.github}
+          variant="outline"
+          onPress={() => openLink(GITHUB_URL)}
+          style={{ marginTop: 16 }}
+        />
       </Card>
 
       {/* Technicke info */}
@@ -1760,18 +2629,43 @@ const MoreTab = () => {
           <Text style={styles.techValue}>osm.fit.vutbr.cz</Text>
         </View>
         <View style={styles.techRow}>
+          <Text style={styles.techLabel}>Projekt období API:</Text>
+          <Text style={styles.techValue}>řeřicha.fun</Text>
+        </View>
+        <View style={styles.techRow}>
           <Text style={styles.techLabel}>Platforma:</Text>
           <Text style={styles.techValue}>React Native / Expo</Text>
         </View>
         <View style={styles.techRow}>
           <Text style={styles.techLabel}>Mapa:</Text>
-          <Text style={styles.techValue}>Leaflet + OSM Mapnik</Text>
+          <Text style={styles.techValue}>Leaflet + OSM</Text>
         </View>
         <View style={styles.techRow}>
           <Text style={styles.techLabel}>Autorizace:</Text>
           <Text style={styles.techValue}>OAuth2 (OSM)</Text>
         </View>
+        <View style={styles.techRow}>
+          <Text style={styles.techLabel}>OSM tagy:</Text>
+          <Text style={styles.techValue}>Overpass Turbo API</Text>
+        </View>
       </Card>
+
+      {/* OSM Notes OAuth info */}
+      <Card style={styles.infoCard}>
+        <Text style={styles.infoTitle}>{Icons.note} OSM Poznámky</Text>
+        <Text style={styles.infoText}>
+          Pro vytváření OSM poznámek není potřeba autorizace. Pro správu poznámek 
+          (komentáře, uzavření) je nutné přihlášení na osm.org.{'\n\n'}
+          Více info: openstreetmap.org/user/new
+        </Text>
+      </Card>
+
+      <SettingsModal
+        visible={settingsModalVisible}
+        onClose={() => setSettingsModalVisible(false)}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />
     </ScrollView>
   );
 };
@@ -1785,6 +2679,10 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginModalVisible, setLoginModalVisible] = useState(false);
+  const [settings, setSettings] = useState({
+    photoLimit: 160,
+    customTileUrl: '',
+  });
 
   const login = () => {
     setLoginModalVisible(true);
@@ -1792,7 +2690,6 @@ export default function App() {
 
   const logout = async () => {
     try {
-      // Zavolat logout endpoint
       await fetch(`${AUTH_URL}?logout`, { credentials: 'include' });
       setUser(null);
       setIsLoggedIn(false);
@@ -1811,6 +2708,10 @@ export default function App() {
 
   const navigateToMapUpload = () => {
     setActiveTab('map');
+  };
+
+  const handleSettingsChange = (newSettings) => {
+    setSettings(prev => ({ ...prev, ...newSettings }));
   };
 
   return (
@@ -1838,9 +2739,20 @@ export default function App() {
 
         {/* Obsah */}
         <View style={styles.content}>
-          {activeTab === 'fody' && <FodyTab onNavigateToMapUpload={navigateToMapUpload} />}
-          {activeTab === 'map' && <MapTab />}
-          {activeTab === 'more' && <MoreTab />}
+          {activeTab === 'fody' && (
+            <FodyTab 
+              onNavigateToMapUpload={navigateToMapUpload}
+              settings={settings}
+              onSettingsChange={handleSettingsChange}
+            />
+          )}
+          {activeTab === 'map' && <MapTab settings={settings} />}
+          {activeTab === 'more' && (
+            <MoreTab 
+              settings={settings} 
+              onSettingsChange={handleSettingsChange}
+            />
+          )}
         </View>
 
         {/* Spodni navigace */}
@@ -2116,6 +3028,37 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  // Filter Row
+  filterRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: COLORS.background,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  filterChipText: {
+    fontSize: 12,
+    color: COLORS.text,
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+
   // Search
   searchContainer: {
     flexDirection: 'row',
@@ -2226,6 +3169,10 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginTop: 2,
   },
+  authorLink: {
+    color: COLORS.secondary,
+    textDecorationLine: 'underline',
+  },
   photoListDate: {
     fontSize: 12,
     color: COLORS.textSecondary,
@@ -2236,6 +3183,25 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
     fontStyle: 'italic',
+  },
+
+  // Load More
+  loadMoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  loadMoreText: {
+    marginLeft: 8,
+    color: COLORS.textSecondary,
+    fontSize: 14,
+  },
+  endOfListText: {
+    textAlign: 'center',
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    paddingVertical: 16,
   },
 
   // Loading
@@ -2319,6 +3285,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.text,
   },
+  modalAuthorLink: {
+    color: COLORS.secondary,
+    textDecorationLine: 'underline',
+  },
+
+  // OSM Tags Section
+  osmTagsSection: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: 16,
+  },
+  osmTagsToggle: {
+    paddingVertical: 8,
+  },
+  osmTagsToggleText: {
+    color: COLORS.secondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tagsTableContainer: {
+    marginTop: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 12,
+  },
+  tagsTableHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  tagsTableTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  tagsTableClose: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
+  tagsTableLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  tagsTableLoadingText: {
+    marginLeft: 8,
+    color: COLORS.textSecondary,
+    fontSize: 13,
+  },
+  tagsTableError: {
+    color: COLORS.error,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  tagsTableEmpty: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  tagsTableScroll: {
+    maxHeight: 200,
+  },
+  tagsTableRow: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tagsTableKey: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  tagsTableValue: {
+    flex: 2,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+
+  // User Profile
+  userProfileStats: {
+    padding: 16,
+    backgroundColor: COLORS.surface,
+    marginBottom: 8,
+  },
+  userProfileStatsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
 
   // Login Modal
   loginModalContainer: {
@@ -2378,6 +3439,89 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+
+  // Note Modal
+  noteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  noteModalContent: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  noteModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  noteModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  noteModalClose: {
+    fontSize: 20,
+    color: COLORS.textSecondary,
+  },
+  noteModalLocation: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: 12,
+  },
+  noteModalInput: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: COLORS.text,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 12,
+  },
+  noteModalInfo: {
+    backgroundColor: COLORS.primaryLight + '20',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  noteModalInfoText: {
+    fontSize: 12,
+    color: COLORS.text,
+    lineHeight: 18,
+  },
+  noteModalButtons: {
+    flexDirection: 'row',
+  },
+
+  // Settings
+  settingsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  settingsInput: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  settingsHint: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginBottom: 16,
   },
 
   // Upload
@@ -2634,10 +3778,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.surface,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
     borderRadius: 8,
-    marginHorizontal: 4,
+    marginHorizontal: 3,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -2654,11 +3798,11 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
   },
   mapControlIcon: {
-    fontSize: 16,
+    fontSize: 14,
     marginRight: 4,
   },
   mapControlText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: COLORS.text,
   },
@@ -2771,6 +3915,35 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.text,
     lineHeight: 22,
+  },
+  projectMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  projectDate: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginLeft: 8,
+  },
+  progressContainer: {
+    marginTop: 12,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: COLORS.border,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.success,
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 4,
   },
   sectionHeader: {
     fontSize: 16,
