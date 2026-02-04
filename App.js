@@ -572,7 +572,9 @@ const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
 
       if (response.ok) {
         const text = await response.text();
-        onLoginSuccess(text.trim());
+        console.log('API Response:', text); // Logování odpovědi API
+        const username = text.trim(); // Předpokládáme, že API vrací uživatelské jméno jako text
+        onLoginSuccess(username);
         onClose();
       } else {
         console.error('Chyba při přihlášení, status:', response.status);
