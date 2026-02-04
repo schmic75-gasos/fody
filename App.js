@@ -477,9 +477,13 @@ const UserProfileModal = ({ visible, username, onClose }) => {
       const response = await fetch(`${FODY_API_BASE}/api.php?cmd=show&limit=1000`);
       const data = await response.json();
       if (data.features) {
-        const userPhotos = data.features.filter(
-          p => p.properties?.author?.toLowerCase() === username?.toLowerCase()
-        );
+      const userPhotos = data.features.filter(p => {
+  const author = p.properties?.author;
+  return (
+    typeof author === 'string' &&
+    author.toLowerCase() === username?.toLowerCase()
+  );
+});
         setPhotos(userPhotos);
       }
     } catch (error) {
@@ -2457,14 +2461,14 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         </View>
         {isLoggedIn ? (
           <Button
-            title="Odhlasit se"
+            title="Odhlásit se"
             icon={Icons.logout}
             variant="outline"
             onPress={logout}
           />
         ) : (
           <Button
-            title="přihlásit se pres OSM"
+            title="Přihlásit se přes OSM"
             icon={Icons.login}
             onPress={login}
           />
