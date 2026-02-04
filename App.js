@@ -573,7 +573,9 @@ const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
       if (response.ok) {
         const text = await response.text();
         console.log('API Response:', text); // Logování odpovědi API
-        const username = text.trim(); // Předpokládáme, že API vrací uživatelské jméno jako text
+
+        // Pokud API vrací prázdný text, nastavíme výchozí hodnotu
+        const username = text.trim() || 'Neznámý uživatel';
         onLoginSuccess(username);
         onClose();
       } else {
@@ -1916,7 +1918,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           
           var firstComment = props.comments && props.comments[0] ? props.comments[0].text : 'Bez popisu';
           var popupContent = '<div class="popup-title">OSM Note #' + props.id + '</div>' +
-            '<div class="popup-info">Stav: ' + (isOpen ? 'Otevrena' : 'Uzavrena') + '</div>' +
+            '<div class="popup-info">Stav: ' + (isOpen ? 'Otevřená' : 'Uzavřená') + '</div>' +
             '<div class="popup-tags">' + firstComment.substring(0, 100) + (firstComment.length > 100 ? '...' : '') + '</div>';
           
           marker.bindPopup(popupContent);
