@@ -2584,7 +2584,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.1.0</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.1</Text>
           </View>
         </View>
         
