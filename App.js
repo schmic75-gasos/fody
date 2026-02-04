@@ -1943,7 +1943,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         map.removeLayer(userMarker);
       }
       userMarker = L.marker([lat, lon], { icon: userIcon }).addTo(map);
-      userMarker.bindPopup('<b>Vase poloha</b>');
+      userMarker.bindPopup('<b>Vaše poloha</b>');
     };
 
     window.centerOnUser = function() {
