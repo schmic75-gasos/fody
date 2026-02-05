@@ -32,10 +32,13 @@ import {
   StatusBar,
   Animated,
   Easing,
+  PanResponder,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 // Konstanty
 const FODY_API_BASE = 'https://osm.fit.vutbr.cz/fody';
@@ -126,6 +129,38 @@ const Icons = {
   github: '💻',
   expand: '⤢',
   settings: '⚙️',
+  download: '⬇️',
+  fullscreen: '⛶',
+};
+
+// ============================================
+// CUSTOM SLIDER COMPONENT
+// ============================================
+const CustomSlider = ({ value, onValueChange, minimumValue = 10, maximumValue = 1000, step = 10 }) => {
+  const trackWidth = 280;
+  const thumbX = ((value - minimumValue) / (maximumValue - minimumValue)) * trackWidth;
+
+  const handleSliderPress = (event) => {
+    const { locationX } = event.nativeEvent;
+    const newX = Math.max(0, Math.min(trackWidth, locationX));
+    const newValue = Math.round((newX / trackWidth) * (maximumValue - minimumValue) / step) * step + minimumValue;
+    onValueChange(Math.min(maximumValue, Math.max(minimumValue, newValue)));
+  };
+
+  return (
+    <View style={styles.customSliderContainer}>
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={handleSliderPress}
+        style={styles.customSliderTrack}
+      >
+        <View style={[styles.customSliderFilled, { width: thumbX }]} />
+        <View
+          style={[styles.customSliderThumb, { left: thumbX - 10 }]}
+        />
+      </TouchableOpacity>
+    </View>
+  );
 };
 
 // ============================================
@@ -359,14 +394,73 @@ const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
   );
 };
 
+// Fullscreen Photo Modal
+const FullscreenPhotoModal = ({ visible, photoId, onClose }) => {
+  if (!photoId) return null;
+
+  return (
+    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen">
+      <SafeAreaView style={styles.fullscreenPhotoContainer}>
+        <View style={styles.fullscreenPhotoHeader}>
+          <TouchableOpacity onPress={onClose} style={styles.fullscreenPhotoCloseBtn}>
+            <Text style={styles.fullscreenPhotoCloseText}>{Icons.close}</Text>
+          </TouchableOpacity>
+          <Text style={styles.fullscreenPhotoTitle}>Fotka #{photoId}</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <View style={styles.fullscreenPhotoContent}>
+          <Image
+            source={{ uri: `${FODY_API_BASE}/files/${photoId}.jpg` }}
+            style={styles.fullscreenPhotoImage}
+            resizeMode="contain"
+          />
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
 // Photo Detail Modal with expanded features
 const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
   const [showTags, setShowTags] = useState(false);
+  const [fullscreenVisible, setFullscreenVisible] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   if (!photo) return null;
-  
+
   const properties = photo.properties || {};
   const coords = photo.geometry?.coordinates;
+
+  const downloadPhoto = async () => {
+    try {
+      setDownloading(true);
+      const fileName = `Fody_${properties.id}.jpg`;
+      const fileUri = FileSystem.documentDirectory + fileName;
+
+      const downloadResult = await FileSystem.downloadAsync(
+        `${FODY_API_BASE}/files/${properties.id}.jpg`,
+        fileUri
+      );
+
+      if (downloadResult.status === 200) {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(downloadResult.uri, {
+            mimeType: 'image/jpeg',
+            dialogTitle: `Uložit fotku ${fileName}`,
+          });
+        } else {
+          Alert.alert('Úspěch', `Fotka byla stažena do: ${fileName}`);
+        }
+      }
+    } catch (error) {
+      console.error('Chyba při stahování fotky:', error);
+      Alert.alert('Chyba', 'Nepodařilo se stáhnout fotku');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
@@ -425,9 +519,28 @@ const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
             
             <View style={styles.modalInfoRow}>
               <Text style={styles.modalInfoLabel}>Stav:</Text>
-              <Badge 
-                text={properties.enabled === 't' || properties.enabled === true ? 'Aktivni' : 'Neaktivni'} 
-                variant={properties.enabled === 't' || properties.enabled === true ? 'success' : 'warning'} 
+              <Badge
+                text={properties.enabled === 't' || properties.enabled === true ? 'Aktivni' : 'Neaktivni'}
+                variant={properties.enabled === 't' || properties.enabled === true ? 'success' : 'warning'}
+              />
+            </View>
+
+            {/* Action buttons */}
+            <View style={styles.photoActionButtons}>
+              <Button
+                title="Fullscreen"
+                icon={Icons.fullscreen}
+                variant="secondary"
+                onPress={() => setFullscreenVisible(true)}
+                style={styles.photoActionButton}
+              />
+              <Button
+                title={downloading ? 'Stahování...' : 'Stáhnout'}
+                icon={Icons.download}
+                onPress={downloadPhoto}
+                loading={downloading}
+                disabled={downloading}
+                style={styles.photoActionButton}
               />
             </View>
 
@@ -453,6 +566,13 @@ const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
             )}
           </View>
         </ScrollView>
+
+        {/* Fullscreen Photo Modal */}
+        <FullscreenPhotoModal
+          visible={fullscreenVisible}
+          photoId={properties.id}
+          onClose={() => setFullscreenVisible(false)}
+        />
       </SafeAreaView>
     </Modal>
   );
@@ -710,14 +830,15 @@ const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
 
 // Settings Modal for photo limit etc.
 const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
-  const [photoLimit, setPhotoLimit] = useState(String(settings?.photoLimit || 160));
+  const [photoLimit, setPhotoLimit] = useState(settings?.photoLimit || 160);
   const [customTileUrl, setCustomTileUrl] = useState(settings?.customTileUrl || '');
+  const [autoLoadPhotos, setAutoLoadPhotos] = useState(settings?.autoLoadPhotos !== false);
 
   const saveSettings = () => {
-    const limit = parseInt(photoLimit) || 160;
     onSettingsChange({
-      photoLimit: Math.max(10, Math.min(1000, limit)),
+      photoLimit: Math.max(10, Math.min(1000, photoLimit)),
       customTileUrl: customTileUrl.trim(),
+      autoLoadPhotos: autoLoadPhotos,
     });
     onClose();
   };
@@ -733,15 +854,33 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.settingsLabel}>Limit načítání fotek (10-1000)</Text>
-          <TextInput
-            style={styles.settingsInput}
+          <View style={styles.settingsLabelContainer}>
+            <Text style={styles.settingsLabel}>Limit načítání fotek</Text>
+            <View style={styles.settingsLimitValue}>
+              <Text style={styles.settingsLimitValueText}>{photoLimit} fotek</Text>
+            </View>
+          </View>
+          <CustomSlider
             value={photoLimit}
-            onChangeText={setPhotoLimit}
-            keyboardType="numeric"
-            placeholder="160"
-            placeholderTextColor={COLORS.textSecondary}
+            onValueChange={setPhotoLimit}
+            minimumValue={10}
+            maximumValue={1000}
+            step={10}
           />
+          <Text style={styles.settingsSliderHint}>Posuň jezdec pro nastavení limitu (10-1000 fotek)</Text>
+
+          <View style={styles.settingsToggleContainer}>
+            <View style={styles.settingsToggleLabel}>
+              <Text style={styles.settingsLabel}>Automatické načítání fotek</Text>
+              <Text style={styles.settingsToggleHint}>Fotky se budou načítat po přeswipování na konec</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.settingsToggle, autoLoadPhotos && styles.settingsToggleActive]}
+              onPress={() => setAutoLoadPhotos(!autoLoadPhotos)}
+            >
+              <View style={[styles.settingsToggleButton, autoLoadPhotos && styles.settingsToggleButtonActive]} />
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.settingsLabel}>Vlastní mapový podklad (URL)</Text>
           <TextInput
@@ -1041,10 +1180,19 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
           }
           contentContainerStyle={styles.photoListContainer}
-          onEndReached={loadMorePhotos}
+          onEndReached={settings?.autoLoadPhotos !== false ? loadMorePhotos : null}
           onEndReachedThreshold={0.5}
           ListFooterComponent={
-            hasMore ? (
+            !settings?.autoLoadPhotos && hasMore ? (
+              <View style={styles.loadMoreButtonContainer}>
+                <Button
+                  title="Načíst další fotky"
+                  icon={Icons.refresh}
+                  onPress={loadMorePhotos}
+                  style={styles.loadMoreButton}
+                />
+              </View>
+            ) : settings?.autoLoadPhotos && hasMore ? (
               <View style={styles.loadMoreContainer}>
                 <ActivityIndicator color={COLORS.primary} />
                 <Text style={styles.loadMoreText}>Načítám další fotky...</Text>
@@ -1300,10 +1448,10 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
               ))}
             </ScrollView>
 
-            <Text style={styles.uploadLabel}>Reference (číslo, kód)</Text>
+            <Text style={styles.uploadLabel}>Referenční označení (číslo, kód)</Text>
             <TextInput
               style={styles.uploadInput}
-              placeholder="napr. 12345"
+              placeholder="např. 12345"
               value={reference}
               onChangeText={setReference}
               placeholderTextColor={COLORS.textSecondary}
@@ -1337,7 +1485,12 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             {'\u2022'} Fotka musí být ve formátu JPEG{'\n'}
             {'\u2022'} Minimální velikost: 100 KB{'\n'}
             {'\u2022'} Musí obsahovat EXIF datum pořízení{'\n'}
-            {'\u2022'} Pro nahrávání je potřeba přihlášení OSM účtem
+            {'\u2022'} Pro nahrávání je potřeba přihlášení OSM účtem{'\n'}
+            {'\u2022'} Dodržujte pravidla nahrávání a autorských práv{'\n'}
+            {'\u2022'} Referenční označení lze vyčíst z rocestníku, většinou se nachází na hlavní tabuli rozcestníku vpravo dole. Jeho znění je většinou ZKRATKA_OKRESU-ČÍSLO (např. PJ jako okres Plzeň-Jih, a za tím číslo unikátní rozcestníku.){'\n'}
+            {'\u2022'} Pokud fotka neobsahuje EXIF s polohou, je potřeba zadat souřadnice ručně nebo vybrat na mapě.{'\n'}
+            {'\u2022'} Po nahrání bude fotka zkontrolována a ověřena správcem.{'\n'}
+            {'\u2022'} Rozcestníky, u kterých máte podezření, že jsou chybné nebo neaktuální, můžete nahlásit pomocí OSM poznámky (viz sekce Mapa)či zadat poznámku přímo při uploadu.
           </Text>
         </Card>
       </ScrollView>
@@ -2182,7 +2335,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       const result = await response.text();
       
       if (response.ok && result.startsWith('1')) {
-        Alert.alert('Uspech', 'Fotka byla uspesne nahrana!');
+        Alert.alert('Uspech', 'Fotka byla úspěšně nahrána!');
         setShowUploadModal(false);
         setUploadImage(null);
         setSelectedTag('');
@@ -2242,16 +2395,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             <Text style={styles.mapControlText}>Moje poloha</Text>
           </TouchableOpacity>
         </Animated.View>
-        
-        <TouchableOpacity
-          style={[styles.mapControlBtn, mapBearing !== 0 && styles.mapControlBtnActive]}
-          onPress={resetMapRotation}
-        >
-          <Text style={[styles.mapControlIcon, { transform: [{ rotate: `${-mapBearing}deg` }] }]}>
-            {Icons.compass}
-          </Text>
-          <Text style={styles.mapControlText}>Kompas</Text>
-        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.mapControlBtn}
@@ -2584,7 +2727,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.1.1</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.2</Text>
           </View>
         </View>
         
@@ -2617,7 +2760,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
         </Text>
         <Text style={styles.credits}>
-          Založeno na Fody API od Tomáše Kašpárka
+          Založeno na Fody API od Tomáše Kašpárka a na API pro projekt období od Vojtěcha Fošnára.
         </Text>
         
         <Button
@@ -2690,6 +2833,7 @@ export default function App() {
   const [settings, setSettings] = useState({
     photoLimit: 160,
     customTileUrl: '',
+    autoLoadPhotos: true,
   });
 
   const login = () => {
@@ -3205,6 +3349,14 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 14,
   },
+  loadMoreButtonContainer: {
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  loadMoreButton: {
+    minWidth: 200,
+  },
   endOfListText: {
     textAlign: 'center',
     color: COLORS.textSecondary,
@@ -3275,6 +3427,45 @@ const styles = StyleSheet.create({
     height: 300,
     backgroundColor: COLORS.background,
   },
+
+  // Fullscreen Photo
+  fullscreenPhotoContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  fullscreenPhotoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  fullscreenPhotoCloseBtn: {
+    padding: 8,
+  },
+  fullscreenPhotoCloseText: {
+    fontSize: 24,
+    color: '#FFFFFF',
+  },
+  fullscreenPhotoTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    flex: 1,
+    textAlign: 'center',
+  },
+  fullscreenPhotoContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+  },
+  fullscreenPhotoImage: {
+    width: '100%',
+    height: '100%',
+  },
+
   modalInfo: {
     padding: 16,
   },
@@ -3312,6 +3503,15 @@ const styles = StyleSheet.create({
     color: COLORS.secondary,
     fontSize: 14,
     fontWeight: '600',
+  },
+  photoActionButtons: {
+    flexDirection: 'row',
+    marginTop: 16,
+    marginBottom: 16,
+    gap: 8,
+  },
+  photoActionButton: {
+    flex: 1,
   },
   tagsTableContainer: {
     marginTop: 12,
@@ -3509,6 +3709,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
 
+  // Custom Slider
+  customSliderContainer: {
+    marginBottom: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  customSliderTrack: {
+    width: 280,
+    height: 6,
+    backgroundColor: COLORS.border,
+    borderRadius: 3,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  customSliderFilled: {
+    height: 6,
+    backgroundColor: COLORS.primary,
+    borderRadius: 3,
+  },
+  customSliderThumb: {
+    position: 'absolute',
+    top: -7,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+
   // Settings
   settingsLabel: {
     fontSize: 14,
@@ -3516,6 +3749,30 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: 8,
     marginTop: 12,
+  },
+  settingsLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  settingsLimitValue: {
+    backgroundColor: COLORS.primary + '20',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  settingsLimitValueText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  settingsSliderHint: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginBottom: 16,
+    fontStyle: 'italic',
   },
   settingsInput: {
     backgroundColor: COLORS.background,
@@ -3530,6 +3787,47 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textSecondary,
     marginBottom: 16,
+  },
+  settingsToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+  },
+  settingsToggleLabel: {
+    flex: 1,
+  },
+  settingsToggleHint: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+  },
+  settingsToggle: {
+    width: 50,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.border,
+    padding: 2,
+    marginLeft: 12,
+    justifyContent: 'center',
+  },
+  settingsToggleActive: {
+    backgroundColor: COLORS.primary,
+  },
+  settingsToggleButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    alignSelf: 'flex-start',
+  },
+  settingsToggleButtonActive: {
+    alignSelf: 'flex-end',
   },
 
   // Upload
