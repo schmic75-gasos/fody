@@ -7,7 +7,7 @@
  * Kompletni mobilni klient pro praci s Fody API
  * Kompatibilni s Expo Go
  * 
- * @version 1.1.0
+ * @version 1.1.2
  * @license 0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
  */
 
@@ -484,14 +484,14 @@ const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
               <Text style={styles.modalInfoLabel}>{Icons.user} Autor:</Text>
               <TouchableOpacity onPress={() => onAuthorPress && onAuthorPress(properties.author)}>
                 <Text style={[styles.modalInfoValue, styles.modalAuthorLink]}>
-                  {properties.author || 'Neznamy'}
+                  {properties.author || 'Neznámý'}
                 </Text>
               </TouchableOpacity>
             </View>
             
             <View style={styles.modalInfoRow}>
-              <Text style={styles.modalInfoLabel}>{Icons.calendar} Vytvoreno:</Text>
-              <Text style={styles.modalInfoValue}>{properties.created || 'Nezname'}</Text>
+              <Text style={styles.modalInfoLabel}>{Icons.calendar} Vytvořeno:</Text>
+              <Text style={styles.modalInfoValue}>{properties.created || 'Neznámé'}</Text>
             </View>
             
             {properties.ref && String(properties.ref) !== 'none' && String(properties.ref).trim() !== '' && (
@@ -509,18 +509,18 @@ const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
             )}
             
             <View style={styles.modalInfoRow}>
-              <Text style={styles.modalInfoLabel}>{Icons.location} Souradnice:</Text>
+              <Text style={styles.modalInfoLabel}>{Icons.location} Souřadnice:</Text>
               <Text style={styles.modalInfoValue}>
-                {coords 
+                {coords
                   ? `${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}`
-                  : 'Nezname'}
+                  : 'Neznámé'}
               </Text>
             </View>
             
             <View style={styles.modalInfoRow}>
               <Text style={styles.modalInfoLabel}>Stav:</Text>
               <Badge
-                text={properties.enabled === 't' || properties.enabled === true ? 'Aktivni' : 'Neaktivni'}
+                text={properties.enabled === 't' || properties.enabled === true ? 'Aktivní' : 'Neaktivní'}
                 variant={properties.enabled === 't' || properties.enabled === true ? 'success' : 'warning'}
               />
             </View>
@@ -752,7 +752,7 @@ const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
 
     setSubmitting(true);
     try {
-      // OSM Notes API - vytvoreni poznamky (nevyzaduje auth pro vytvoreni)
+      // OSM Notes API - vytvoření poznámky (nevyzaduje auth pro vytvoření)
       const url = `${OSM_NOTES_API}?lat=${location.latitude}&lon=${location.longitude}&text=${encodeURIComponent(noteText)}`;
       const response = await fetch(url, {
         method: 'POST',
@@ -1165,7 +1165,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
                   <Text style={styles.photoListId}>#{item.properties?.id}</Text>
                   <TouchableOpacity onPress={() => openUserProfile(item.properties?.author)}>
                     <Text style={[styles.photoListAuthor, styles.authorLink]}>
-                      {item.properties?.author || 'Neznamy'}
+                      {item.properties?.author || 'Neznámý'}
                     </Text>
                   </TouchableOpacity>
                   <Text style={styles.photoListDate}>{item.properties?.created}</Text>
@@ -2027,11 +2027,11 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           
           var popupContent = '<div class="popup-title">#' + props.id + '</div>' +
             '<img src="https://osm.fit.vutbr.cz/fody/files/250px/' + props.id + '.jpg" onerror="this.style.display=\\'none\\'" />' +
-            '<div class="popup-info"><b>' + (props.author || 'Neznamy') + '</b></div>' +
+            '<div class="popup-info"><b>' + (props.author || 'Neznámý') + '</b></div>' +
             '<div class="popup-info">' + (props.created || '') + '</div>' +
             (props.tags ? '<div class="popup-tags">' + props.tags + '</div>' : '') +
-            '<button class="popup-expand-btn" onclick="window.expandPopup(' + props.id + ')">Vice info</button>' +
-            '<button class="popup-note-btn" onclick="window.addNoteAt(' + coords[0] + ',' + coords[1] + ')">Pridat poznamku</button>';
+            '<button class="popup-expand-btn" onclick="window.expandPopup(' + props.id + ')">Více info</button>' +
+            '<button class="popup-note-btn" onclick="window.addNoteAt(' + coords[0] + ',' + coords[1] + ')">Přidat poznámku</button>';
           
           marker.bindPopup(popupContent);
           
