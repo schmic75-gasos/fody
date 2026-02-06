@@ -41,8 +41,8 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 // Konstanty
-const FODY_API_BASE = 'https://osm.fit.vutbr.cz/fody';
-const AUTH_URL = 'https://osm.fit.vutbr.cz/fody/auth2.php';
+const FODY_API_BASE = 'https://osm.fit.vut.cz/fody';
+const AUTH_URL = 'https://osm.fit.vut.cz/fody/auth2.php';
 const OSM_MAP_URL = 'https://openstreetmap.cz/#map=11/49.9601/14.2367&layers=dAKVGB';
 const DISCORD_URL = 'https://discord.gg/A9eRVaRzRe';
 const PROJECT_MONTH_API_URL = 'https://xn--eicha-hcbb.fun/api/1/project-of-the-month.json';
