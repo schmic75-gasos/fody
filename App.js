@@ -7,7 +7,7 @@
  * Kompletni mobilni klient pro praci s Fody API
  * Kompatibilni s Expo Go
  * 
- * @version 1.1.2
+ * @version 1.1.3
  * @license 0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
  */
 
@@ -49,7 +49,7 @@ const PROJECT_MONTH_API_URL = 'https://xn--eicha-hcbb.fun/api/1/project-of-the-m
 const OSM_API_BASE = 'https://api.openstreetmap.org/api/0.6';
 const OSM_NOTES_API = 'https://api.openstreetmap.org/api/0.6/notes';
 const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
-const GITHUB_URL = 'https://github.com/schmic75-gasos/fody';
+const GITHUB_URL = 'https://codeberg.org/osmcz/fody-app';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -1451,7 +1451,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             <Text style={styles.uploadLabel}>Referenční označení (číslo, kód)</Text>
             <TextInput
               style={styles.uploadInput}
-              placeholder="např. 12345"
+              placeholder="např. PJ345m"
               value={reference}
               onChangeText={setReference}
               placeholderTextColor={COLORS.textSecondary}
@@ -1490,7 +1490,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             {'\u2022'} Referenční označení lze vyčíst z rocestníku, většinou se nachází na hlavní tabuli rozcestníku vpravo dole. Jeho znění je většinou ZKRATKA_OKRESU-ČÍSLO (např. PJ jako okres Plzeň-Jih, a za tím číslo unikátní rozcestníku.){'\n'}
             {'\u2022'} Pokud fotka neobsahuje EXIF s polohou, je potřeba zadat souřadnice ručně nebo vybrat na mapě.{'\n'}
             {'\u2022'} Po nahrání bude fotka zkontrolována a ověřena správcem.{'\n'}
-            {'\u2022'} Rozcestníky, u kterých máte podezření, že jsou chybné nebo neaktuální, můžete nahlásit pomocí OSM poznámky (viz sekce Mapa)či zadat poznámku přímo při uploadu.
+            {'\u2022'} Rozcestníky, u kterých máte podezření, že jsou chybné nebo neaktuální, můžete nahlásit pomocí OSM poznámky (viz. sekce Mapa) či zadat poznámku přímo při uploadu.
           </Text>
         </Card>
       </ScrollView>
@@ -2586,6 +2586,40 @@ const MoreTab = ({ settings, onSettingsChange }) => {
     }
   };
 
+  // Přidání funkce pro zobrazení fotek uživatele nahraných přes aplikaci Fody
+  const UserPhotosModal = ({ visible, userPhotos, onClose }) => (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalContainer}>
+        <Text style={styles.modalTitle}>Vaše nahrané fotky</Text>
+        <Text style={styles.modalDisclaimer}>
+          Zde jsou zobrazeny pouze fotky, které byly nahrány přímo přes aplikaci Fody.
+        </Text>
+        <FlatList
+          data={userPhotos}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={({ item }) => (
+            <View style={styles.photoItem}>
+              <Image source={{ uri: `${FODY_API_BASE}/files/250px/${item.id}.jpg` }} style={styles.photoImage} />
+              <Text style={styles.photoId}>#{item.id}</Text>
+            </View>
+          )}
+        />
+        <Button title="Zavřít" onPress={onClose} />
+      </View>
+    </Modal>
+  );
+
+  const [userPhotosVisible, setUserPhotosVisible] = useState(false);
+  const [userPhotos, setUserPhotos] = useState([]);
+
+  const handleUserButtonClick = async () => {
+    // Načtení fotek uživatele nahraných přes aplikaci Fody
+    const response = await fetch(`${FODY_API_BASE}/user/photos`); // Předpokládáme, že API vrací fotky uživatele
+    const photos = await response.json();
+    setUserPhotos(photos);
+    setUserPhotosVisible(true);
+  };
+
   return (
     <ScrollView style={styles.moreContainer} contentContainerStyle={styles.moreContent}>
       {/* přihláseni */}
@@ -2727,7 +2761,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.1.2</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.3</Text>
           </View>
         </View>
         
@@ -2764,7 +2798,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         </Text>
         
         <Button
-          title="Zdrojový kód na GitHubu"
+          title="Zdrojový kód na CodeBergu"
           icon={Icons.github}
           variant="outline"
           onPress={() => openLink(GITHUB_URL)}
@@ -2778,6 +2812,10 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         <View style={styles.techRow}>
           <Text style={styles.techLabel}>API Server:</Text>
           <Text style={styles.techValue}>osm.fit.vutbr.cz</Text>
+        </View>
+         <View style={styles.techRow}>
+          <Text style={styles.techLabel}>Alternativní API Server:</Text>
+          <Text style={styles.techValue}>osm.fit.vut.cz</Text>
         </View>
         <View style={styles.techRow}>
           <Text style={styles.techLabel}>Projekt období API:</Text>
@@ -2807,7 +2845,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         <Text style={styles.infoText}>
           Pro vytváření OSM poznámek není potřeba autorizace. Pro správu poznámek 
           (komentáře, uzavření) je nutné přihlášení na osm.org.{'\n\n'}
-          Více info: openstreetmap.org/user/new
+          Více info: <Text style={{ color: COLORS.secondary }} onPress={() => Linking.openURL('https://openstreetmap.org/user/new')}>openstreetmap.org/user/new</Text>
         </Text>
       </Card>
 
@@ -3993,6 +4031,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
     marginBottom: 12,
+    marginTop: 8,
   },
   statsGrid: {
     flexDirection: 'row',
