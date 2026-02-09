@@ -7,11 +7,11 @@
  * Kompletni mobilni klient pro praci s Fody API
  * Kompatibilni s Expo Go
  * 
- * @version 1.1.3
+ * @version 1.1.4
  * @license 0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -752,8 +752,9 @@ const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
 
     setSubmitting(true);
     try {
-      // OSM Notes API - vytvoření poznámky (nevyzaduje auth pro vytvoření)
-      const url = `${OSM_NOTES_API}?lat=${location.latitude}&lon=${location.longitude}&text=${encodeURIComponent(noteText)}`;
+      // OSM Notes API - vytvoření poznámky (nevyžaduje auth pro vytvoření)
+      const noteWithAppInfo = `${noteText}\n\nvia FodyApp version 1.1.4`;
+      const url = `${OSM_NOTES_API}?lat=${location.latitude}&lon=${location.longitude}&text=${encodeURIComponent(noteWithAppInfo)}`;
       const response = await fetch(url, {
         method: 'POST',
       });
@@ -2356,6 +2357,23 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     }
   };
 
+  // Function to limit map objects at low zoom levels
+const limitMapObjects = (zoomLevel, objects) => {
+  const MAX_OBJECTS = 100; // Set a limit for low zoom levels
+  if (zoomLevel < 10 && objects.length > MAX_OBJECTS) {
+    alert('Pro zlepšení výkonu je počet objektů při nízkém přiblížení omezen. Přibližte mapu pro zobrazení všech objektů.');
+    return objects.slice(0, MAX_OBJECTS);
+  }
+  return objects;
+};
+
+// Example usage in MapTab
+const filteredObjects = useMemo(() => {
+  return limitMapObjects(currentZoomLevel, mapObjects);
+}, [currentZoomLevel, mapObjects]);
+
+// Pass filteredObjects to the map rendering logic
+
   // Animation interpolation for fly button
   const flyButtonScale = flyAnimation.interpolate({
     inputRange: [0, 1],
@@ -2761,7 +2779,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.1.3</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.4</Text>
           </View>
         </View>
         
@@ -2903,6 +2921,43 @@ export default function App() {
   const handleSettingsChange = (newSettings) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
   };
+
+  // Function to send anonymous usage data
+const sendUsageData = async (data) => {
+  try {
+    const response = await fetch('https://fluffini.cz/upload_usage_data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to upload usage data:', response.statusText);
+    }
+  } catch (error) {
+    console.warn('Error uploading usage data:', error);
+  }
+};
+
+// Example usage data collection
+const collectUsageData = () => {
+  const usageData = {
+    timestamp: new Date().toISOString(),
+    screenWidth: SCREEN_WIDTH,
+    screenHeight: SCREEN_HEIGHT,
+    platform: Platform.OS,
+    version: '1.1.4',
+  };
+
+  sendUsageData(usageData);
+};
+
+// Call collectUsageData periodically or at app start
+useEffect(() => {
+  collectUsageData();
+}, []);
 
   return (
     <AuthContext.Provider value={{ user, isLoggedIn, login, logout }}>
