@@ -39,6 +39,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Konstanty
 const FODY_API_BASE = 'https://osm.fit.vut.cz/fody';
@@ -139,6 +140,7 @@ const Icons = {
 const CustomSlider = ({ value, onValueChange, minimumValue = 10, maximumValue = 1000, step = 10 }) => {
   const trackWidth = 280;
   const thumbX = ((value - minimumValue) / (maximumValue - minimumValue)) * trackWidth;
+  const [isDragging, setIsDragging] = useState(false);
 
   const handleSliderPress = (event) => {
     const { locationX } = event.nativeEvent;
@@ -147,16 +149,30 @@ const CustomSlider = ({ value, onValueChange, minimumValue = 10, maximumValue = 
     onValueChange(Math.min(maximumValue, Math.max(minimumValue, newValue)));
   };
 
+  const handleResponderStart = () => {
+    setIsDragging(true);
+  };
+
+  const handleResponderEnd = () => {
+    setIsDragging(false);
+  };
+
   return (
     <View style={styles.customSliderContainer}>
       <TouchableOpacity
-        activeOpacity={1}
+        activeOpacity={0.8}
         onPress={handleSliderPress}
-        style={styles.customSliderTrack}
+        onPressIn={handleResponderStart}
+        onPressOut={handleResponderEnd}
+        style={[styles.customSliderTrack, isDragging && styles.customSliderTrackActive]}
       >
         <View style={[styles.customSliderFilled, { width: thumbX }]} />
         <View
-          style={[styles.customSliderThumb, { left: thumbX - 10 }]}
+          style={[
+            styles.customSliderThumb,
+            { left: thumbX - 10 },
+            isDragging && styles.customSliderThumbActive
+          ]}
         />
       </TouchableOpacity>
     </View>
@@ -834,14 +850,57 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
   const [photoLimit, setPhotoLimit] = useState(settings?.photoLimit || 160);
   const [customTileUrl, setCustomTileUrl] = useState(settings?.customTileUrl || '');
   const [autoLoadPhotos, setAutoLoadPhotos] = useState(settings?.autoLoadPhotos !== false);
+  const [objectLimitEnabled, setObjectLimitEnabled] = useState(settings?.objectLimitEnabled !== false);
+  const [objectLimitThreshold, setObjectLimitThreshold] = useState(settings?.objectLimitThreshold || 10);
+  const [objectLimitCount, setObjectLimitCount] = useState(settings?.objectLimitCount || 100);
+
+  // Modal state pro ruční zadání
+  const [manualInputVisible, setManualInputVisible] = useState(false);
+  const [manualInputType, setManualInputType] = useState(null);
+  const [manualInputValue, setManualInputValue] = useState('');
+  const [manualInputMin, setManualInputMin] = useState(10);
+  const [manualInputMax, setManualInputMax] = useState(1000);
+  const [manualInputLabel, setManualInputLabel] = useState('');
 
   const saveSettings = () => {
     onSettingsChange({
       photoLimit: Math.max(10, Math.min(1000, photoLimit)),
       customTileUrl: customTileUrl.trim(),
       autoLoadPhotos: autoLoadPhotos,
+      objectLimitEnabled: objectLimitEnabled,
+      objectLimitThreshold: Math.max(1, Math.min(18, objectLimitThreshold)),
+      objectLimitCount: Math.max(10, Math.min(500, objectLimitCount)),
     });
     onClose();
+  };
+
+  // Otevřít modal pro ruční zadání
+  const openManualInput = (type, currentValue, min, max, label) => {
+    setManualInputType(type);
+    setManualInputValue(String(currentValue));
+    setManualInputMin(min);
+    setManualInputMax(max);
+    setManualInputLabel(label);
+    setManualInputVisible(true);
+  };
+
+  // Uložit ručně zadanou hodnotu
+  const saveManualInput = () => {
+    const numValue = Math.max(manualInputMin, Math.min(manualInputMax, parseInt(manualInputValue) || 0));
+
+    switch (manualInputType) {
+      case 'photoLimit':
+        setPhotoLimit(numValue);
+        break;
+      case 'objectLimitThreshold':
+        setObjectLimitThreshold(numValue);
+        break;
+      case 'objectLimitCount':
+        setObjectLimitCount(numValue);
+        break;
+    }
+
+    setManualInputVisible(false);
   };
 
   return (
@@ -855,46 +914,109 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.settingsLabelContainer}>
-            <Text style={styles.settingsLabel}>Limit načítání fotek</Text>
-            <View style={styles.settingsLimitValue}>
-              <Text style={styles.settingsLimitValueText}>{photoLimit} fotek</Text>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 0, paddingBottom: 16 }}>
+            <View style={styles.settingsLabelContainer}>
+              <Text style={styles.settingsLabel}>Limit načítání fotek</Text>
+              <TouchableOpacity
+                style={styles.settingsLimitValue}
+                onPress={() => openManualInput('photoLimit', photoLimit, 10, 1000, 'Limit fotek')}
+              >
+                <Text style={styles.settingsLimitValueText}>{photoLimit} fotek</Text>
+              </TouchableOpacity>
             </View>
-          </View>
-          <CustomSlider
-            value={photoLimit}
-            onValueChange={setPhotoLimit}
-            minimumValue={10}
-            maximumValue={1000}
-            step={10}
-          />
-          <Text style={styles.settingsSliderHint}>Posuň jezdec pro nastavení limitu (10-1000 fotek)</Text>
+            <CustomSlider
+              value={photoLimit}
+              onValueChange={setPhotoLimit}
+              minimumValue={10}
+              maximumValue={1000}
+              step={10}
+            />
+            <Text style={styles.settingsSliderHint}>Posuň jezdec pro nastavení limitu (10-1000 fotek)</Text>
 
-          <View style={styles.settingsToggleContainer}>
-            <View style={styles.settingsToggleLabel}>
-              <Text style={styles.settingsLabel}>Automatické načítání fotek</Text>
-              <Text style={styles.settingsToggleHint}>Fotky se budou načítat po přeswipování na konec</Text>
+            <View style={styles.settingsToggleContainer}>
+              <View style={styles.settingsToggleLabel}>
+                <Text style={styles.settingsLabel}>Automatické načítání fotek</Text>
+                <Text style={styles.settingsToggleHint}>Fotky se budou načítat po přeswipování na konec</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.settingsToggle, autoLoadPhotos && styles.settingsToggleActive]}
+                onPress={() => setAutoLoadPhotos(!autoLoadPhotos)}
+              >
+                <View style={[styles.settingsToggleButton, autoLoadPhotos && styles.settingsToggleButtonActive]} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[styles.settingsToggle, autoLoadPhotos && styles.settingsToggleActive]}
-              onPress={() => setAutoLoadPhotos(!autoLoadPhotos)}
-            >
-              <View style={[styles.settingsToggleButton, autoLoadPhotos && styles.settingsToggleButtonActive]} />
-            </TouchableOpacity>
-          </View>
 
-          <Text style={styles.settingsLabel}>Vlastní mapový podklad (URL)</Text>
-          <TextInput
-            style={[styles.settingsInput, { marginBottom: 8 }]}
-            value={customTileUrl}
-            onChangeText={setCustomTileUrl}
-            placeholder="https://tile.example.com/{z}/{x}/{y}.png"
-            placeholderTextColor={COLORS.textSecondary}
-            autoCapitalize="none"
-          />
-          <Text style={styles.settingsHint}>
-            Nechte prázdné pro výchozí OSM. Použijte {'{z}'}, {'{x}'}, {'{y}'} jako placeholdery.
-          </Text>
+            <Text style={styles.settingsLabel}>Vlastní mapový podklad (URL)</Text>
+            <TextInput
+              style={[styles.settingsInput, { marginBottom: 8 }]}
+              value={customTileUrl}
+              onChangeText={setCustomTileUrl}
+              placeholder="https://tile.example.com/{z}/{x}/{y}.png"
+              placeholderTextColor={COLORS.textSecondary}
+              autoCapitalize="none"
+            />
+            <Text style={styles.settingsHint}>
+              Nechte prázdné pro výchozí OSM. Použijte {'{z}'}, {'{x}'}, {'{y}'} jako placeholdery.
+            </Text>
+
+            {/* Zoom Limit Settings */}
+            <View style={{ borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 16, paddingTop: 16 }}>
+              <Text style={[styles.settingsLabel, { marginTop: 0 }]}>Limit objektů při nízkém zoomu</Text>
+
+              <View style={styles.settingsToggleContainer}>
+                <View style={styles.settingsToggleLabel}>
+                  <Text style={styles.settingsLabel}>Zapnout limit</Text>
+                  <Text style={styles.settingsToggleHint}>Omezit počet objektů při nízkém zoomu pro výkon</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.settingsToggle, objectLimitEnabled && styles.settingsToggleActive]}
+                  onPress={() => setObjectLimitEnabled(!objectLimitEnabled)}
+                >
+                  <View style={[styles.settingsToggleButton, objectLimitEnabled && styles.settingsToggleButtonActive]} />
+                </TouchableOpacity>
+              </View>
+
+              {objectLimitEnabled && (
+                <>
+                  <View style={styles.settingsLabelContainer}>
+                    <Text style={styles.settingsLabel}>Prahová hodnota zoomu</Text>
+                    <TouchableOpacity
+                      style={styles.settingsLimitValue}
+                      onPress={() => openManualInput('objectLimitThreshold', objectLimitThreshold, 1, 18, 'Zoom threshold')}
+                    >
+                      <Text style={styles.settingsLimitValueText}>Zoom ≤ {objectLimitThreshold}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <CustomSlider
+                    value={objectLimitThreshold}
+                    onValueChange={setObjectLimitThreshold}
+                    minimumValue={1}
+                    maximumValue={18}
+                    step={1}
+                  />
+                  <Text style={styles.settingsSliderHint}>Limit se aktivuje při zoomu nižší nebo rovné tomuto zoomu</Text>
+
+                  <View style={styles.settingsLabelContainer}>
+                    <Text style={styles.settingsLabel}>Maximální počet objektů</Text>
+                    <TouchableOpacity
+                      style={styles.settingsLimitValue}
+                      onPress={() => openManualInput('objectLimitCount', objectLimitCount, 10, 500, 'Max objektů')}
+                    >
+                      <Text style={styles.settingsLimitValueText}>{objectLimitCount} objektů</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <CustomSlider
+                    value={objectLimitCount}
+                    onValueChange={setObjectLimitCount}
+                    minimumValue={10}
+                    maximumValue={500}
+                    step={10}
+                  />
+                  <Text style={styles.settingsSliderHint}>Maximální počet zobrazených objektů (fotek a poznámek)</Text>
+                </>
+              )}
+            </View>
+          </ScrollView>
 
           <View style={styles.noteModalButtons}>
             <Button
@@ -911,6 +1033,42 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
           </View>
         </View>
       </View>
+
+      {/* Manual Input Modal */}
+      <Modal visible={manualInputVisible} animationType="fade" transparent>
+        <View style={styles.manualInputOverlay}>
+          <View style={styles.manualInputContainer}>
+            <Text style={styles.manualInputTitle}>{manualInputLabel}</Text>
+            <Text style={styles.manualInputHint}>
+              Zadejte hodnotu ({manualInputMin} - {manualInputMax})
+            </Text>
+
+            <TextInput
+              style={styles.manualInputField}
+              keyboardType="number-pad"
+              value={manualInputValue}
+              onChangeText={setManualInputValue}
+              placeholder={String(manualInputMax / 2)}
+              placeholderTextColor={COLORS.textSecondary}
+              autoFocus
+            />
+
+            <View style={styles.manualInputButtons}>
+              <Button
+                title="Zrušit"
+                variant="outline"
+                onPress={() => setManualInputVisible(false)}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <Button
+                title="Uložit"
+                onPress={saveManualInput}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 };
@@ -951,6 +1109,9 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const photosPerPage = settings?.photoLimit || 160;
+
+  // Current zoom level state
+  const [currentZoomLevel, setCurrentZoomLevel] = useState(15); // Default zoom level
 
   // Nacteni fotek z API
   const fetchPhotos = useCallback(async (limit = 2000) => {
@@ -1651,15 +1812,17 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   const [osmNotes, setOsmNotes] = useState([]);
   const [showNotes, setShowNotes] = useState(true);
   const [mapBearing, setMapBearing] = useState(0);
-  
+  const [currentZoomLevel, setCurrentZoomLevel] = useState(11);
+  const [limitAlertVisible, setLimitAlertVisible] = useState(false);
+
   // Note modal
   const [addNoteModalVisible, setAddNoteModalVisible] = useState(false);
   const [noteLocation, setNoteLocation] = useState(null);
-  
+
   // Extended popup modal
   const [extendedPopupVisible, setExtendedPopupVisible] = useState(false);
   const [extendedPopupData, setExtendedPopupData] = useState(null);
-  
+
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadImage, setUploadImage] = useState(null);
@@ -1674,6 +1837,11 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
 
   // Custom tile URL
   const customTileUrl = settings?.customTileUrl || '';
+
+  // Settings pro zoom limit
+  const objectLimitEnabled = settings?.objectLimitEnabled !== false;
+  const objectLimitThreshold = settings?.objectLimitThreshold || 10;
+  const objectLimitCount = settings?.objectLimitCount || 100;
 
   useEffect(() => {
     fetchTags();
@@ -1729,11 +1897,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       const response = await fetch(url);
       const data = await response.json();
       if (data.features) {
-        setPhotos(data.features);
-        
+        let featuresToShow = data.features;
+
+        // Aplikuj limit pokud je aktivovaný a zoom je nízký
+        if (objectLimitEnabled && currentZoomLevel < objectLimitThreshold) {
+          featuresToShow = data.features.slice(0, objectLimitCount);
+        }
+
+        setPhotos(featuresToShow);
+
         if (webViewRef.current && mapLoaded) {
           webViewRef.current.injectJavaScript(`
-            window.updatePhotos(${JSON.stringify(data.features)});
+            window.updatePhotos(${JSON.stringify(featuresToShow)});
             true;
           `);
         }
@@ -1757,10 +1932,17 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       const response = await fetch(url);
       const data = await response.json();
       if (data.features) {
-        setOsmNotes(data.features);
+        let featuresToShow = data.features;
+
+        // Aplikuj limit pokud je aktivovaný a zoom je nízký
+        if (objectLimitEnabled && currentZoomLevel < objectLimitThreshold) {
+          featuresToShow = data.features.slice(0, Math.floor(objectLimitCount / 2));
+        }
+
+        setOsmNotes(featuresToShow);
         if (webViewRef.current && mapLoaded) {
           webViewRef.current.injectJavaScript(`
-            window.updateOSMNotes(${JSON.stringify(data.features)});
+            window.updateOSMNotes(${JSON.stringify(featuresToShow)});
             true;
           `);
         }
@@ -2148,9 +2330,17 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             south: bounds.getSouth(),
             east: bounds.getEast(),
             west: bounds.getWest()
-          }
+          },
+          zoom: map.getZoom()
         }));
       }, 500);
+    });
+
+    map.on('zoomend', function() {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'zoomChanged',
+        zoom: map.getZoom()
+      }));
     });
 
     window.setUploadMode = function(mode) {
@@ -2185,7 +2375,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   const handleMessage = (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      
+
       if (data.type === 'mapLoaded') {
         setMapLoaded(true);
         if (userLocation) {
@@ -2194,9 +2384,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             true;
           `);
         }
+      } else if (data.type === 'zoomChanged') {
+        setCurrentZoomLevel(data.zoom);
+
+        // Zkontroluj limit
+        if (objectLimitEnabled && data.zoom < objectLimitThreshold && !limitAlertVisible) {
+          setLimitAlertVisible(true);
+        } else if (limitAlertVisible && (data.zoom >= objectLimitThreshold || !objectLimitEnabled)) {
+          setLimitAlertVisible(false);
+        }
       } else if (data.type === 'locationSelected') {
         setSelectedLocation({ latitude: data.lat, longitude: data.lon });
-        
+
         if (onLocationSelected) {
           onLocationSelected({ latitude: data.lat, longitude: data.lon });
         } else {
@@ -2204,20 +2403,20 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             'Poloha vybrana',
             `Lat: ${data.lat.toFixed(6)}\nLon: ${data.lon.toFixed(6)}`,
             [
-              { text: 'Zrusit', style: 'cancel' },
-              { 
+              { text: 'Zrušit', style: 'cancel' },
+              {
                 text: 'Pridat OSM poznamku',
                 onPress: () => {
                   setNoteLocation({ latitude: data.lat, longitude: data.lon });
                   setAddNoteModalVisible(true);
                 }
               },
-              { 
-                text: 'Nahrát fotku zde', 
+              {
+                text: 'Nahrát fotku zde',
                 onPress: () => {
                   if (!isLoggedIn) {
                     Alert.alert('přihláseni', 'Pro nahrani fotek je potreba se přihlásit.', [
-                      { text: 'Zrusit', style: 'cancel' },
+                      { text: 'Zrušit', style: 'cancel' },
                       { text: 'přihlásit se', onPress: login },
                     ]);
                     return;
@@ -2229,6 +2428,15 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           );
         }
       } else if (data.type === 'boundsChanged') {
+        // Aplikuj limit na příchozí objekty
+        let photosToShow = photos;
+        let notesToShow = osmNotes;
+
+        if (objectLimitEnabled && data.zoom < objectLimitThreshold) {
+          photosToShow = photos.slice(0, objectLimitCount);
+          notesToShow = osmNotes.slice(0, Math.floor(objectLimitCount / 2));
+        }
+
         fetchPhotosForMap(data.bounds);
         fetchOSMNotes(data.bounds);
       } else if (data.type === 'markerClick') {
@@ -2357,23 +2565,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
     }
   };
 
-  // Function to limit map objects at low zoom levels
-const limitMapObjects = (zoomLevel, objects) => {
-  const MAX_OBJECTS = 100; // Set a limit for low zoom levels
-  if (zoomLevel < 10 && objects.length > MAX_OBJECTS) {
-    alert('Pro zlepšení výkonu je počet objektů při nízkém přiblížení omezen. Přibližte mapu pro zobrazení všech objektů.');
-    return objects.slice(0, MAX_OBJECTS);
-  }
-  return objects;
-};
-
-// Example usage in MapTab
-const filteredObjects = useMemo(() => {
-  return limitMapObjects(currentZoomLevel, mapObjects);
-}, [currentZoomLevel, mapObjects]);
-
-// Pass filteredObjects to the map rendering logic
-
   // Animation interpolation for fly button
   const flyButtonScale = flyAnimation.interpolate({
     inputRange: [0, 1],
@@ -2400,7 +2591,7 @@ const filteredObjects = useMemo(() => {
         >
           <Text style={styles.mapControlIcon}>{uploadMode ? Icons.close : Icons.camera}</Text>
           <Text style={[styles.mapControlText, uploadMode && styles.mapControlTextActive]}>
-            {uploadMode ? 'Zrusit' : 'Nahrát'}
+            {uploadMode ? 'Zrušit' : 'Nahrát'}
           </Text>
         </TouchableOpacity>
         
@@ -2448,6 +2639,24 @@ const filteredObjects = useMemo(() => {
         <View style={styles.mapLoading}>
           <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.mapLoadingText}>Načítám mapu...</Text>
+        </View>
+      )}
+
+      {limitAlertVisible && (
+        <View style={styles.limitAlertContainer}>
+          <View style={styles.limitAlertContent}>
+            <Text style={styles.limitAlertIcon}>⚠️</Text>
+            <Text style={styles.limitAlertTitle}>Limit objektů aktivován</Text>
+            <Text style={styles.limitAlertText}>
+              Při nízkém zoomu se zobrazuje max {objectLimitCount} objektů pro výkon. Přibližte si mapu.
+            </Text>
+            <TouchableOpacity
+              style={styles.limitAlertButton}
+              onPress={() => setLimitAlertVisible(false)}
+            >
+              <Text style={styles.limitAlertButtonText}>Rozumím</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -2890,7 +3099,31 @@ export default function App() {
     photoLimit: 160,
     customTileUrl: '',
     autoLoadPhotos: true,
+    objectLimitEnabled: true,
+    objectLimitThreshold: 10,
+    objectLimitCount: 100,
   });
+  const [appStartTime] = useState(new Date());
+  const [deviceId, setDeviceId] = useState(null);
+
+  // Generuj či načti device ID
+  useEffect(() => {
+    const initializeDeviceId = async () => {
+      try {
+        let id = await AsyncStorage.getItem('deviceId');
+        if (!id) {
+          // Generuj nový device ID
+          id = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await AsyncStorage.setItem('deviceId', id);
+        }
+        setDeviceId(id);
+      } catch (error) {
+        console.error('Error managing device ID:', error);
+      }
+    };
+
+    initializeDeviceId();
+  }, []);
 
   const login = () => {
     setLoginModalVisible(true);
@@ -2943,21 +3176,44 @@ const sendUsageData = async (data) => {
 
 // Example usage data collection
 const collectUsageData = () => {
+  if (!deviceId) return; // Počkej na device ID
+
+  const sessionDuration = new Date() - appStartTime;
   const usageData = {
     timestamp: new Date().toISOString(),
+    deviceId: deviceId,
     screenWidth: SCREEN_WIDTH,
     screenHeight: SCREEN_HEIGHT,
     platform: Platform.OS,
     version: '1.1.4',
+    sessionDurationMs: sessionDuration,
+    osmUser: isLoggedIn ? user : null,
+    activeTab: activeTab,
+    settings: {
+      objectLimitEnabled: settings.objectLimitEnabled,
+      photoLimit: settings.photoLimit,
+    }
   };
 
   sendUsageData(usageData);
 };
 
-// Call collectUsageData periodically or at app start
+// Call collectUsageData periodically
 useEffect(() => {
-  collectUsageData();
-}, []);
+  // Initial call after device ID is loaded
+  if (deviceId) {
+    collectUsageData();
+  }
+
+  // Send data every 5 minutes
+  const interval = setInterval(() => {
+    if (deviceId) {
+      collectUsageData();
+    }
+  }, 5 * 60 * 1000);
+
+  return () => clearInterval(interval);
+}, [deviceId, isLoggedIn, user, activeTab, settings]);
 
   return (
     <AuthContext.Provider value={{ user, isLoggedIn, login, logout }}>
@@ -3752,14 +4008,18 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
+    flex: 1,
+    flexDirection: 'column',
+    paddingTop: 0,
   },
   noteModalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
   },
   noteModalTitle: {
     fontSize: 18,
@@ -3800,6 +4060,9 @@ const styles = StyleSheet.create({
   },
   noteModalButtons: {
     flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    paddingTop: 12,
   },
 
   // Custom Slider
@@ -3816,6 +4079,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  customSliderTrackActive: {
+    backgroundColor: COLORS.border,
+  },
   customSliderFilled: {
     height: 6,
     backgroundColor: COLORS.primary,
@@ -3828,11 +4094,84 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     backgroundColor: COLORS.primary,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3,
-    elevation: 5,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  customSliderThumbActive: {
+    width: 24,
+    height: 24,
+    top: -9,
+    ...Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 5,
+      },
+    }),
+  },
+
+  // Manual Input Modal
+  manualInputOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  manualInputContainer: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 20,
+    width: '80%',
+    maxWidth: 320,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
+  },
+  manualInputTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  manualInputHint: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: 16,
+  },
+  manualInputField: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  manualInputButtons: {
+    flexDirection: 'row',
+    gap: 8,
   },
 
   // Settings
@@ -3851,10 +4190,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   settingsLimitValue: {
-    backgroundColor: COLORS.primary + '20',
+    backgroundColor: COLORS.primary + '25',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary + '40',
   },
   settingsLimitValueText: {
     fontSize: 14,
@@ -4254,6 +4595,61 @@ const styles = StyleSheet.create({
         elevation: 2,
       },
     }),
+  },
+
+  // Limit Alert
+  limitAlertContainer: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
+  },
+  limitAlertContent: {
+    backgroundColor: COLORS.warning + 'E6',
+    padding: 16,
+    alignItems: 'center',
+  },
+  limitAlertIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  limitAlertTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  limitAlertText: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  limitAlertButton: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  limitAlertButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   // More Tab
