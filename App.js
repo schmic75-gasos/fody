@@ -853,6 +853,7 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
   const [objectLimitEnabled, setObjectLimitEnabled] = useState(settings?.objectLimitEnabled !== false);
   const [objectLimitThreshold, setObjectLimitThreshold] = useState(settings?.objectLimitThreshold || 10);
   const [objectLimitCount, setObjectLimitCount] = useState(settings?.objectLimitCount || 100);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(settings?.telemetryEnabled || true);
 
   // Modal state pro ruční zadání
   const [manualInputVisible, setManualInputVisible] = useState(false);
@@ -870,6 +871,7 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
       objectLimitEnabled: objectLimitEnabled,
       objectLimitThreshold: Math.max(1, Math.min(18, objectLimitThreshold)),
       objectLimitCount: Math.max(10, Math.min(500, objectLimitCount)),
+      telemetryEnabled: telemetryEnabled,
     });
     onClose();
   };
@@ -1727,15 +1729,20 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             {tag.secondary && tag.secondary.length > 0 && (
               <View style={styles.secondaryTags}>
                 {tag.secondary.map((sec) => (
-                  <View key={sec.id} style={styles.secondaryTag}>
+                  <TouchableOpacity
+                    key={sec.id}
+                    style={[styles.secondaryTag, selectedTags.includes(sec.name) && styles.selectedTag]}
+                    onPress={() => handleTagSelection(sec.name)}
+                  >
                     <Text style={styles.secondaryTagName}>{sec.name}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             )}
           </View>
         ))}
       </Card>
+      <Button title="Odeslat tagy" onPress={sendTagsToServer} />;
     </ScrollView>
   );
 
@@ -1798,7 +1805,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
   );
 };
 
-// MAPA TAB - OSM mapa s moznosti nahrávání, polohou uzivatele a rozcesniky
+// MAPA TAB - OSM mapa s moznosti nahrávání, polohou uzivatele a rozcestniky
 const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadComplete, settings }) => {
   const { isLoggedIn, login } = useAuth();
   const webViewRef = useRef(null);
@@ -1835,7 +1842,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   // Animation for "My Location" button
   const flyAnimation = useRef(new Animated.Value(0)).current;
 
-  // Custom tile URL
+ 
   const customTileUrl = settings?.customTileUrl || '';
 
   // Settings pro zoom limit
@@ -2415,7 +2422,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
                 text: 'Nahrát fotku zde',
                 onPress: () => {
                   if (!isLoggedIn) {
-                    Alert.alert('přihláseni', 'Pro nahrani fotek je potreba se přihlásit.', [
+                    Alert.alert('přihláseni', 'Pro nahrání fotek je potřeba se přihlásit.', [
                       { text: 'Zrušit', style: 'cancel' },
                       { text: 'přihlásit se', onPress: login },
                     ]);
@@ -2558,7 +2565,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         Alert.alert('Chyba', `nahrávání selhalo: ${result}`);
       }
     } catch (error) {
-      console.error('Chyba pri nahrávání:', error);
+      console.error('Chyba při nahrávání:', error);
       Alert.alert('Chyba', 'Nepodařilo se nahrát fotku.');
     } finally {
       setUploading(false);
@@ -2729,8 +2736,6 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
               {tags.map((tag) => (
                 <TouchableOpacity
                   key={tag.id}
-                  style={[styles.tagChip, selectedTag === tag.name && styles.tagChipSelected]}
-                  onPress={() => setSelectedTag(tag.name)}
                 >
                   <Text style={[styles.tagChipText, selectedTag === tag.name && styles.tagChipTextSelected]}>
                     {tag.name}
@@ -2751,7 +2756,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             <Text style={styles.uploadLabel}>Poznámka</Text>
             <TextInput
               style={[styles.uploadInput, styles.uploadTextarea]}
-              placeholder="Volitelny popis..."
+              placeholder="Volitelný popis..."
               value={note}
               onChangeText={setNote}
               multiline
@@ -2850,7 +2855,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
   return (
     <ScrollView style={styles.moreContainer} contentContainerStyle={styles.moreContent}>
       {/* přihláseni */}
-      <Card style={styles.userCard}>
+      <Card style={styles.userCard} onPress={handleUserButtonClick}>
         <View style={styles.userCardHeader}>
           <Text style={styles.userIcon}>{Icons.user}</Text>
           <View style={styles.userCardInfo}>
@@ -2867,23 +2872,14 @@ const MoreTab = ({ settings, onSettingsChange }) => {
             )}
           </View>
         </View>
-        {isLoggedIn ? (
-          <Button
-            title="Odhlásit se"
-            icon={Icons.logout}
-            variant="outline"
-            onPress={logout}
-          />
-        ) : (
-          <Button
-            title="Přihlásit se přes OSM"
-            icon={Icons.login}
-            onPress={login}
-          />
-        )}
       </Card>
 
-      {/* Projekt obdobi - now from API */}
+      <UserPhotosModal
+        visible={userPhotosVisible}
+        userPhotos={userPhotos}
+        onClose={() => setUserPhotosVisible(false)}
+      />
+      {/* Projekt období - now from API */}
       <Card style={styles.projectCard}>
         <View style={styles.projectHeader}>
           <Text style={styles.projectIcon}>{Icons.calendar}</Text>
@@ -2994,7 +2990,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         
         <Text style={styles.aboutDescription}>
           Fody je aplikace pro správu a nahrávání fotografií infrastruktury pro projekt OpenStreetMap. 
-          Pomocí této aplikace můžete prohlížet, nahrávat a spravovat fotografie rozcestníků, 
+          Pomocí této aplikace můžete prohlížet, nahrávání a spravovat fotografie rozcestníků, 
           informačních tabulí, bodů záchrany a dalších objektů.
         </Text>
 
@@ -4387,7 +4383,7 @@ const styles = StyleSheet.create({
   },
   tagChipSelected: {
     backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    borderColor: COLORS.primaryDark,
   },
   tagChipText: {
     fontSize: 14,
@@ -4861,5 +4857,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.text,
     fontWeight: '500',
+  },
+  tagsSelectorContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginVertical: 10,
+  },
+  tagButton: {
+    padding: 8,
+    margin: 5,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 5,
+    backgroundColor: COLORS.surface,
+  },
+  tagButtonSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primaryDark,
+  },
+  tagButtonText: {
+    color: COLORS.text,
   },
 });
