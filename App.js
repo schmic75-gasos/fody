@@ -310,7 +310,12 @@ const StatCard = ({ title, value, icon, color }) => (
 
 // Photo Grid Item
 const PhotoGridItem = ({ photo, onPress, onAuthorPress }) => (
-  <TouchableOpacity style={styles.photoGridItem} onPress={() => onPress(photo)} activeOpacity={0.8}>
+  <TouchableOpacity 
+    key={`photo-${photo.id}`}
+    style={styles.photoGridItem} 
+    onPress={() => onPress(photo)} 
+    activeOpacity={0.8}
+  >
     <Image
       source={{ uri: `${FODY_API_BASE}/files/250px/${photo.id}.jpg` }}
       style={styles.photoGridImage}
@@ -653,10 +658,11 @@ const UserProfileModal = ({ visible, username, onClose }) => {
         ) : (
           <FlatList
             data={photos}
-            keyExtractor={(item) => String(item.properties?.id || Math.random())}
+            keyExtractor={(item) => `user-photo-${item.properties?.id || Math.random()}`}
             numColumns={3}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <PhotoGridItem 
+                key={`user-photo-item-${item.properties?.id || index}`}
                 photo={item.properties} 
                 onPress={() => openPhotoDetail(item)} 
               />
@@ -686,6 +692,131 @@ const UserProfileModal = ({ visible, username, onClose }) => {
             setSelectedPhoto(null);
           }}
         />
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// Panoramax Viewer Modal
+const PanoramaxViewerModal = ({ visible, panoramaxId, sequenceId, onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [imageUrl, setImageUrl] = useState('');
+  const [interactiveUrl, setInteractiveUrl] = useState('');
+
+  useEffect(() => {
+    if (visible && panoramaxId) {
+      loadPanoramaxData();
+    }
+  }, [visible, panoramaxId]);
+
+  const loadPanoramaxData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Zkontrolujeme, zda máme ID
+      if (!panoramaxId) {
+        throw new Error('Chybí ID panoramax fotky');
+      }
+
+      // Sestavíme URL pro náhled
+      const imgUrl = `https://panoramax.openstreetmap.fr/derivates/${panoramaxId}/sd.jpg`;
+      setImageUrl(imgUrl);
+
+      // Sestavíme URL pro interaktivní prohlížení
+      let interactive = `https://api.panoramax.xyz/?focus=pic&pic=${panoramaxId}`;
+      if (sequenceId) {
+        interactive += `&seq=${sequenceId}`;
+      }
+      setInteractiveUrl(interactive);
+
+    } catch (err) {
+      console.error('Chyba při načítání Panoramax:', err);
+      setError(err.message || 'Nepodařilo se načíst Panoramax data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openInBrowser = () => {
+    if (interactiveUrl) {
+      Linking.openURL(interactiveUrl).catch(() => {
+        Alert.alert('Chyba', 'Nepodařilo se otevřít prohlížeč');
+      });
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{Icons.compass} Panoramax</Text>
+          <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>{Icons.close}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.modalContent} contentContainerStyle={{ padding: 16 }}>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+              <Text style={styles.loadingText}>Načítám Panoramax...</Text>
+            </View>
+          ) : error ? (
+            <Card style={[styles.infoCard, { backgroundColor: COLORS.error + '15' }]}>
+              <Text style={[styles.infoTitle, { color: COLORS.error }]}>
+                {Icons.warning} Chyba
+              </Text>
+              <Text style={styles.infoText}>{error}</Text>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <Text style={styles.uploadLabel}>Panoramax ID: {panoramaxId}</Text>
+                {sequenceId && (
+                  <Text style={styles.modalInfoValue}>Sekvence: {sequenceId}</Text>
+                )}
+              </Card>
+
+              {imageUrl && (
+                <View style={styles.selectedImageContainer}>
+                  <Image 
+                    source={{ uri: imageUrl }} 
+                    style={styles.selectedImage}
+                    onError={() => setError('Nepodařilo se načíst obrázek')}
+                  />
+                </View>
+              )}
+
+              <View style={styles.photoActionButtons}>
+                <Button
+                  title="Otevřít interaktivně"
+                  icon={Icons.expand}
+                  onPress={openInBrowser}
+                  variant="secondary"
+                  style={styles.photoActionButton}
+                />
+                <Button
+                  title="Zavřít"
+                  variant="outline"
+                  onPress={onClose}
+                  style={styles.photoActionButton}
+                />
+              </View>
+
+              <Card style={styles.infoCard}>
+                <Text style={styles.infoTitle}>{Icons.info} Informace o Panoramax</Text>
+                <Text style={styles.infoText}>
+                  Panoramax je projekt pro sdílení street-level fotek a panoramat.{'\n\n'}
+                  • Interaktivní prohlížeč umožňuje prohlížení 360°{'\n'}
+                  • Data jsou přístupná pod otevřenou licencí{'\n'}
+                  • Spravováno komunitou OpenStreetMap
+                </Text>
+              </Card>
+            </>
+          )}
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
@@ -769,7 +900,7 @@ const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
     setSubmitting(true);
     try {
       // OSM Notes API - vytvoření poznámky (nevyžaduje auth pro vytvoření)
-      const noteWithAppInfo = `${noteText}\n\nvia FodyApp version 1.1.4`;
+      const noteWithAppInfo = `${noteText}\n\nvia FodyApp version 1.1.5`;
       const url = `${OSM_NOTES_API}?lat=${location.latitude}&lon=${location.longitude}&text=${encodeURIComponent(noteWithAppInfo)}`;
       const response = await fetch(url, {
         method: 'POST',
@@ -1382,14 +1513,19 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
       ) : (
         <FlatList
           data={displayedPhotos}
-          keyExtractor={(item) => String(item.properties?.id || Math.random())}
+          keyExtractor={(item) => `photo-${item.properties?.id || Math.random()}`}
           numColumns={viewMode === 'grid' ? 3 : 1}
           key={viewMode}
-          renderItem={({ item }) => 
+          renderItem={({ item, index }) => 
             viewMode === 'grid' ? (
-              <PhotoGridItem photo={item.properties} onPress={() => openPhotoDetail(item)} />
+              <PhotoGridItem 
+                key={`photo-grid-${item.properties?.id || index}`}
+                photo={item.properties} 
+                onPress={() => openPhotoDetail(item)} 
+              />
             ) : (
               <TouchableOpacity 
+                key={`photo-list-${item.properties?.id || index}`}
                 style={styles.photoListItem} 
                 onPress={() => openPhotoDetail(item)}
               >
@@ -1678,7 +1814,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsScroll}>
               {tags.map((tag) => (
                 <TouchableOpacity
-                  key={tag.id}
+                  key={`tag-${tag.id}`}
                   style={[styles.tagChip, selectedTag === tag.name && styles.tagChipSelected]}
                   onPress={() => setSelectedTag(tag.name)}
                 >
@@ -1693,7 +1829,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsScroll}>
               {tags.flatMap(tag => tag.secondary || []).map((tag) => (
                 <TouchableOpacity
-                  key={tag.id}
+                  key={`supp-tag-${tag.id}`}
                   style={[styles.tagChip, selectedSupplementaryTags.includes(tag.name) && styles.tagChipSelected]}
                   onPress={() => {
                     setSelectedSupplementaryTags(prev => 
@@ -1818,7 +1954,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
       <Text style={[styles.sectionTitle, { marginTop: 24 }]}>{Icons.tag} Dostupné typy objektů</Text>
       <Card style={styles.tagsCard}>
         {tags.map((tag) => (
-          <View key={tag.id} style={styles.tagItem}>
+          <View key={`tag-item-${tag.id}`} style={styles.tagItem}>
             <View style={styles.tagHeader}>
               <Text style={styles.tagName}>{tag.name}</Text>
               {tag.ref === 1 && <Badge text="Vyzaduje ref" variant="info" />}
@@ -1827,7 +1963,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
             {tag.secondary && tag.secondary.length > 0 && (
               <View style={styles.secondaryTags}>
                 {tag.secondary.map((sec) => (
-                  <View key={sec.id} style={styles.secondaryTag}>
+                  <View key={`sec-tag-${sec.id}`} style={styles.secondaryTag}>
                     <Text style={styles.secondaryTagName}>{sec.name}</Text>
                   </View>
                 ))}
@@ -1936,6 +2072,10 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   const [layersModalVisible, setLayersModalVisible] = useState(false);
   const [contoursEnabled, setContoursEnabled] = useState(false);
   const [panoramaxEnabled, setPanoramaxEnabled] = useState(false);
+
+  // Panoramax viewer
+  const [panoramaxViewerVisible, setPanoramaxViewerVisible] = useState(false);
+  const [selectedPanoramax, setSelectedPanoramax] = useState({ id: null, sequence: null });
 
   // Animation for "My Location" button
   const flyAnimation = useRef(new Animated.Value(0)).current;
@@ -2064,6 +2204,35 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       setTags(data);
     } catch (error) {
       console.error('Chyba pri nacitani tagu:', error);
+    }
+  };
+
+  // Funkce pro otevření Panoramax viewer
+  const openPanoramaxViewer = async (lat, lon) => {
+    try {
+      // Zkusíme najít nejbližší Panoramax fotku
+      const response = await fetch(
+        `https://api.panoramax.xyz/api/sequences?limit=1&nearby=${lat},${lon}`
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.features && data.features.length > 0) {
+          const feature = data.features[0];
+          setSelectedPanoramax({
+            id: feature.properties?.id,
+            sequence: feature.properties?.first_sequence
+          });
+          setPanoramaxViewerVisible(true);
+        } else {
+          Alert.alert('Info', 'V této oblasti nejsou dostupné Panoramax fotky');
+        }
+      } else {
+        throw new Error('Chyba při dotazování API');
+      }
+    } catch (error) {
+      console.error('Chyba při hledání Panoramax:', error);
+      Alert.alert('Chyba', 'Nepodařilo se najít Panoramax fotky v této oblasti');
     }
   };
 
@@ -2261,16 +2430,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       attribution: '(C) <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, Fody'
     }).addTo(map);
 
-    // Contours layer
+    // Contours layer - UPRAVENO: přidány minZoom a maxZoom
     var contoursLayer = L.tileLayer.wms('https://ags.cuzk.gov.cz/arcgis/services/ZABAGED_VRSTEVNICE/MapServer/WMSServer', {
       layers: '0',
       transparent: true,
       format: 'image/png',
       attribution: '(C) ČÚZK',
-      opacity: 0.4
+      opacity: 0.4,
+      minZoom: 0,  // PŘIDÁNO
+      maxZoom: 19  // PŘIDÁNO
     });
 
-    // Panoramax layer
+    // Panoramax layer - UPRAVENO: přidány minZoom a maxZoom
     var panoramaxLayer = L.vectorGrid.protobuf('https://api.panoramax.xyz/api/map/{z}/{x}/{y}.mvt', {
       vectorTileLayerStyles: {
         sequences: {
@@ -2278,7 +2449,28 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           opacity: 0.5
         }
       },
-      attribution: '© Panoramax'
+      attribution: '© Panoramax',
+      minZoom: 0,   // PŘIDÁNO
+      maxZoom: 19   // PŘIDÁNO
+    });
+
+    // Error handling pro vrstvy
+    contoursLayer.on('tileerror', function(error) {
+      console.error('Chyba při načítání vrstevnic:', error);
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'layerError',
+        layer: 'contours',
+        message: 'Nepodařilo se načíst vrstevnice. Zkontrolujte připojení.'
+      }));
+    });
+
+    panoramaxLayer.on('tileerror', function(error) {
+      console.error('Chyba při načítání Panoramax:', error);
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'layerError',
+        layer: 'panoramax',
+        message: 'Nepodařilo se načíst Panoramax. Zkontrolujte připojení.'
+      }));
     });
 
     // Store layers for toggling
@@ -2557,7 +2749,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             [
               { text: 'Zrušit', style: 'cancel' },
               {
-                text: 'Pridat OSM poznamku',
+                text: 'Přidat OSM poznamku',
                 onPress: () => {
                   setNoteLocation({ latitude: data.lat, longitude: data.lon });
                   setAddNoteModalVisible(true);
@@ -2603,6 +2795,12 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       } else if (data.type === 'addNote') {
         setNoteLocation({ latitude: data.lat, longitude: data.lon });
         setAddNoteModalVisible(true);
+      } else if (data.type === 'layerError') {
+        Alert.alert(
+          'Chyba vrstvy',
+          `${data.message}`,
+          [{ text: 'OK' }]
+        );
       }
     } catch (e) {
       console.error('Error parsing message:', e);
@@ -2761,6 +2959,20 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           style={styles.mapControlBtn}
           onPress={() => {
             if (userLocation) {
+              openPanoramaxViewer(userLocation.latitude, userLocation.longitude);
+            } else {
+              Alert.alert('Poloha', 'Nejprve povolte přístup k poloze');
+            }
+          }}
+        >
+          <Text style={styles.mapControlIcon}>🌄</Text>
+          <Text style={styles.mapControlText}>Panoramax</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.mapControlBtn}
+          onPress={() => {
+            if (userLocation) {
               setNoteLocation(userLocation);
               setAddNoteModalVisible(true);
             } else {
@@ -2776,7 +2988,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           style={styles.mapControlBtn}
           onPress={() => setLayersModalVisible(true)}
         >
-          <Text style={styles.mapControlIcon}>🗺️</Text>
+          <Text style={styles.mapControlIcon}>{Icons.map}</Text>
           <Text style={styles.mapControlText}>Vrstvy</Text>
         </TouchableOpacity>
       </View>
@@ -2888,7 +3100,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsScroll}>
               {tags.map((tag) => (
                 <TouchableOpacity
-                  key={tag.id}
+                  key={`map-tag-${tag.id}`}
                   style={[styles.tagChip, selectedTag === tag.name && styles.tagChipSelected]}
                   onPress={() => setSelectedTag(tag.name)}
                 >
@@ -2911,7 +3123,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
             <Text style={styles.uploadLabel}>Poznámka</Text>
             <TextInput
               style={[styles.uploadInput, styles.uploadTextarea]}
-              placeholder="Volitelny popis..."
+              placeholder="Volitelný popis..."
               value={note}
               onChangeText={setNote}
               multiline
@@ -2950,6 +3162,17 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           }
         }}
       />
+
+      {/* Panoramax Viewer Modal */}
+      <PanoramaxViewerModal
+        visible={panoramaxViewerVisible}
+        panoramaxId={selectedPanoramax.id}
+        sequenceId={selectedPanoramax.sequence}
+        onClose={() => {
+          setPanoramaxViewerVisible(false);
+          setSelectedPanoramax({ id: null, sequence: null });
+        }}
+      />
     </View>
   );
 };
@@ -2960,6 +3183,10 @@ const MoreTab = ({ settings, onSettingsChange }) => {
   const [projectMonth, setProjectMonth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [panoramaxManualVisible, setPanoramaxManualVisible] = useState(false);
+  const [panoramaxId, setPanoramaxId] = useState('');
+  const [panoramaxViewerVisible, setPanoramaxViewerVisible] = useState(false);
+  const [selectedPanoramax, setSelectedPanoramax] = useState({ id: null, sequence: null });
 
   useEffect(() => {
     fetchProjectMonth();
@@ -2991,40 +3218,6 @@ const MoreTab = ({ settings, onSettingsChange }) => {
       case 'wiki': return 'Wiki';
       default: return type || 'Projekt';
     }
-  };
-
-  // Přidání funkce pro zobrazení fotek uživatele nahraných přes aplikaci Fody
-  const UserPhotosModal = ({ visible, userPhotos, onClose }) => (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalContainer}>
-        <Text style={styles.modalTitle}>Vaše nahrané fotky</Text>
-        <Text style={styles.modalDisclaimer}>
-          Zde jsou zobrazeny pouze fotky, které byly nahrány přímo přes aplikaci Fody.
-        </Text>
-        <FlatList
-          data={userPhotos}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <View style={styles.photoItem}>
-              <Image source={{ uri: `${FODY_API_BASE}/files/250px/${item.id}.jpg` }} style={styles.photoImage} />
-              <Text style={styles.photoId}>#{item.id}</Text>
-            </View>
-          )}
-        />
-        <Button title="Zavřít" onPress={onClose} />
-      </View>
-    </Modal>
-  );
-
-  const [userPhotosVisible, setUserPhotosVisible] = useState(false);
-  const [userPhotos, setUserPhotos] = useState([]);
-
-  const handleUserButtonClick = async () => {
-    // Načtení fotek uživatele nahraných přes aplikaci Fody
-    const response = await fetch(`${FODY_API_BASE}/user/photos`); // Předpokládáme, že API vrací fotky uživatele
-    const photos = await response.json();
-    setUserPhotos(photos);
-    setUserPhotosVisible(true);
   };
 
   return (
@@ -3112,6 +3305,16 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         <Text style={styles.linkArrow}>{Icons.forward}</Text>
       </Card>
 
+      {/* Panoramax manual viewer */}
+      <Card style={styles.linkCard} onPress={() => setPanoramaxManualVisible(true)}>
+        <Text style={styles.linkIcon}>🌄</Text>
+        <View style={styles.linkContent}>
+          <Text style={styles.linkTitle}>Panoramax Viewer</Text>
+          <Text style={styles.linkSubtitle}>Prohlížení street-level fotek</Text>
+        </View>
+        <Text style={styles.linkArrow}>{Icons.forward}</Text>
+      </Card>
+
       {/* Odkazy */}
       <Text style={styles.sectionHeader}>{Icons.web} Užitečné odkazy</Text>
       
@@ -3190,6 +3393,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutFeature}>{'\u2022'} Vlastní mapové podklady</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} OSM tagy z Overpass API</Text>
           <Text style={styles.aboutFeature}>{'\u2022'} Projekt období z API</Text>
+          <Text style={styles.aboutFeature}>{'\u2022'} Panoramax prohlížeč</Text>
         </View>
 
         <View style={styles.divider} />
@@ -3244,6 +3448,10 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.techLabel}>OSM tagy:</Text>
           <Text style={styles.techValue}>Overpass Turbo API</Text>
         </View>
+        <View style={styles.techRow}>
+          <Text style={styles.techLabel}>Panoramax:</Text>
+          <Text style={styles.techValue}>api.panoramax.xyz</Text>
+        </View>
       </Card>
 
       {/* OSM Notes OAuth info */}
@@ -3268,6 +3476,62 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         onClose={() => setSettingsModalVisible(false)}
         settings={settings}
         onSettingsChange={onSettingsChange}
+      />
+
+      {/* Panoramax Manual Input Modal */}
+      <Modal visible={panoramaxManualVisible} animationType="slide" transparent>
+        <View style={styles.noteModalOverlay}>
+          <View style={styles.noteModalContent}>
+            <View style={styles.noteModalHeader}>
+              <Text style={styles.noteModalTitle}>🌄 Panoramax Viewer</Text>
+              <TouchableOpacity onPress={() => setPanoramaxManualVisible(false)}>
+                <Text style={styles.noteModalClose}>{Icons.close}</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <TextInput
+              style={styles.noteModalInput}
+              placeholder="Zadejte Panoramax ID..."
+              value={panoramaxId}
+              onChangeText={setPanoramaxId}
+              keyboardType="default"
+              placeholderTextColor={COLORS.textSecondary}
+            />
+            
+            <View style={styles.noteModalButtons}>
+              <Button
+                title="Zrušit"
+                variant="outline"
+                onPress={() => setPanoramaxManualVisible(false)}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <Button
+                title="Otevřít"
+                onPress={() => {
+                  if (panoramaxId.trim()) {
+                    setSelectedPanoramax({ id: panoramaxId.trim(), sequence: null });
+                    setPanoramaxViewerVisible(true);
+                    setPanoramaxManualVisible(false);
+                    setPanoramaxId('');
+                  }
+                }}
+                disabled={!panoramaxId.trim()}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Panoramax Viewer Modal */}
+      <PanoramaxViewerModal
+        visible={panoramaxViewerVisible}
+        panoramaxId={selectedPanoramax.id}
+        sequenceId={selectedPanoramax.sequence}
+        onClose={() => {
+          setPanoramaxViewerVisible(false);
+          setSelectedPanoramax({ id: null, sequence: null });
+        }}
       />
     </ScrollView>
   );
@@ -4457,20 +4721,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
     padding: 2,
     marginLeft: 12,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
   },
   settingsToggleActive: {
     backgroundColor: COLORS.primary,
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
   },
   settingsToggleButton: {
     width: 24,
     height: 24,
     borderRadius: 12,
     backgroundColor: COLORS.surface,
-    alignSelf: 'flex-start',
   },
   settingsToggleButtonActive: {
-    alignSelf: 'flex-end',
+    // alignSelf je nyní řízeno přes rodiče
   },
 
   // Upload
@@ -5108,12 +5374,14 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     backgroundColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
     paddingHorizontal: 2,
   },
   layerToggleActive: {
     backgroundColor: COLORS.primary,
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
   },
   layerToggleButton: {
     width: 26,
