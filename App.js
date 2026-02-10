@@ -1094,6 +1094,62 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
 // HLAVNI OBRAZOVKY
 // ============================================
 
+// Layers Modal Component
+const LayersModal = ({ visible, onClose, contoursEnabled, onContoursChange, panoramaxEnabled, onPanoramaxChange }) => (
+  <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <SafeAreaView style={styles.modalContainer}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>{Icons.map} Vrstvy mapy</Text>
+        <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+          <Text style={styles.modalCloseText}>{Icons.close}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.layersContent} contentContainerStyle={styles.layersContentContainer}>
+        <Text style={styles.layersSection}>Dostupné vrstvy</Text>
+
+        <Card style={styles.layerItem}>
+          <View style={styles.layerHeader}>
+            <View>
+              <Text style={styles.layerTitle}>Vrstevnice ČR</Text>
+              <Text style={styles.layerDescription}>Vrstevnice terénní plochy od ČÚZK</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.layerToggle, contoursEnabled && styles.layerToggleActive]}
+              onPress={() => onContoursChange(!contoursEnabled)}
+            >
+              <View style={[styles.layerToggleButton, contoursEnabled && styles.layerToggleButtonActive]} />
+            </TouchableOpacity>
+          </View>
+        </Card>
+
+        <Card style={styles.layerItem}>
+          <View style={styles.layerHeader}>
+            <View>
+              <Text style={styles.layerTitle}>Panoramax</Text>
+              <Text style={styles.layerDescription}>Street-level imagery z různých zdrojů</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.layerToggle, panoramaxEnabled && styles.layerToggleActive]}
+              onPress={() => onPanoramaxChange(!panoramaxEnabled)}
+            >
+              <View style={[styles.layerToggleButton, panoramaxEnabled && styles.layerToggleButtonActive]} />
+            </TouchableOpacity>
+          </View>
+        </Card>
+
+        <Text style={styles.layersInfo}>
+          💡 Tip: Vrstvy se přidávají nad výchozí mapový podklad a mohou ovlivnit výkon mapy.
+        </Text>
+      </ScrollView>
+
+      <View style={styles.layersButtons}>
+        <Button title="Zavřít" onPress={onClose} />
+      </View>
+    </SafeAreaView>
+  </Modal>
+);
+
 // FODY TAB - Hlavni funkcionalita
 const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
   const { user, isLoggedIn, login, logout } = useAuth();
@@ -1876,6 +1932,11 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  // Layers modal state
+  const [layersModalVisible, setLayersModalVisible] = useState(false);
+  const [contoursEnabled, setContoursEnabled] = useState(false);
+  const [panoramaxEnabled, setPanoramaxEnabled] = useState(false);
+
   // Animation for "My Location" button
   const flyAnimation = useRef(new Animated.Value(0)).current;
 
@@ -2070,6 +2131,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   <link rel="stylesheet" href="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
+  <script src="https://unpkg.com/leaflet.vectorgrid/dist/Leaflet.VectorGrid.bundled.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; }
@@ -2198,6 +2260,51 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       maxZoom: 19,
       attribution: '(C) <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, Fody'
     }).addTo(map);
+
+    // Contours layer
+    var contoursLayer = L.tileLayer.wms('https://ags.cuzk.gov.cz/arcgis/services/ZABAGED_VRSTEVNICE/MapServer/WMSServer', {
+      layers: '0',
+      transparent: true,
+      format: 'image/png',
+      attribution: '(C) ČÚZK'
+    });
+
+    // Panoramax layer
+    var panoramaxLayer = L.vectorGrid.protobuf('https://api.panoramax.xyz/api/map/{z}/{x}/{y}.mvt', {
+      vectorTileLayerStyles: {
+        sequences: {
+          color: '#00ff00',
+          opacity: 0.5
+        }
+      },
+      attribution: '© Panoramax'
+    });
+
+    // Store layers for toggling
+    window.contoursLayer = contoursLayer;
+    window.panoramaxLayer = panoramaxLayer;
+    window.layersToggle = {
+      contours: false,
+      panoramax: false
+    };
+
+    // Function to toggle layers
+    window.toggleLayer = function(layerName, enabled) {
+      window.layersToggle[layerName] = enabled;
+      if (layerName === 'contours') {
+        if (enabled) {
+          map.addLayer(contoursLayer);
+        } else {
+          map.removeLayer(contoursLayer);
+        }
+      } else if (layerName === 'panoramax') {
+        if (enabled) {
+          map.addLayer(panoramaxLayer);
+        } else {
+          map.removeLayer(panoramaxLayer);
+        }
+      }
+    };
 
     // Category icons
     var categoryIcons = ${JSON.stringify(CATEGORY_ICONS)};
@@ -2663,6 +2770,14 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           <Text style={styles.mapControlIcon}>{Icons.note}</Text>
           <Text style={styles.mapControlText}>Poznámka</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.mapControlBtn}
+          onPress={() => setLayersModalVisible(true)}
+        >
+          <Text style={styles.mapControlIcon}>🗺️</Text>
+          <Text style={styles.mapControlText}>Vrstvy</Text>
+        </TouchableOpacity>
       </View>
 
       {uploadMode && (
@@ -2814,6 +2929,26 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           </ScrollView>
         </SafeAreaView>
       </Modal>
+
+      {/* Layers Modal */}
+      <LayersModal
+        visible={layersModalVisible}
+        onClose={() => setLayersModalVisible(false)}
+        contoursEnabled={contoursEnabled}
+        onContoursChange={(enabled) => {
+          setContoursEnabled(enabled);
+          if (webViewRef.current && mapLoaded) {
+            webViewRef.current.injectJavaScript(`window.toggleLayer('contours', ${enabled}); true;`);
+          }
+        }}
+        panoramaxEnabled={panoramaxEnabled}
+        onPanoramaxChange={(enabled) => {
+          setPanoramaxEnabled(enabled);
+          if (webViewRef.current && mapLoaded) {
+            webViewRef.current.injectJavaScript(`window.toggleLayer('panoramax', ${enabled}); true;`);
+          }
+        }}
+      />
     </View>
   );
 };
@@ -4934,5 +5069,82 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.text,
     fontWeight: '500',
+  },
+
+  // Layers Modal Styles
+  layersContent: {
+    flex: 1,
+  },
+  layersContentContainer: {
+    padding: 16,
+  },
+  layersSection: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 16,
+  },
+  layerItem: {
+    marginBottom: 12,
+  },
+  layerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  layerTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  layerDescription: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  layerToggle: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+  },
+  layerToggleActive: {
+    backgroundColor: COLORS.primary,
+  },
+  layerToggleButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: COLORS.surface,
+    marginLeft: 2,
+  },
+  layerToggleButtonActive: {
+    marginLeft: 'auto',
+    marginRight: 2,
+  },
+  layersInfo: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 16,
+    lineHeight: 20,
+  },
+  layersButtons: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+
+  // Legal Card
+  legalCard: {
+    marginBottom: 16,
+  },
+  legalText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
+    textAlign: 'center',
   },
 });
