@@ -7,7 +7,7 @@
  * Kompletni mobilni klient pro praci s Fody API
  * Kompatibilni s Expo Go
  * 
- * @version 1.1.4
+ * @version 1.1.5
  * @license 0BSD OR Apache-2.0 OR CC0-1.0 OR MIT OR Unlicense
  */
 
@@ -853,6 +853,7 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
   const [objectLimitEnabled, setObjectLimitEnabled] = useState(settings?.objectLimitEnabled !== false);
   const [objectLimitThreshold, setObjectLimitThreshold] = useState(settings?.objectLimitThreshold || 10);
   const [objectLimitCount, setObjectLimitCount] = useState(settings?.objectLimitCount || 100);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(settings?.telemetryEnabled !== false);
 
   // Modal state pro ruční zadání
   const [manualInputVisible, setManualInputVisible] = useState(false);
@@ -863,14 +864,17 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
   const [manualInputLabel, setManualInputLabel] = useState('');
 
   const saveSettings = () => {
-    onSettingsChange({
+    const newSettings = {
       photoLimit: Math.max(10, Math.min(1000, photoLimit)),
       customTileUrl: customTileUrl.trim(),
       autoLoadPhotos: autoLoadPhotos,
       objectLimitEnabled: objectLimitEnabled,
       objectLimitThreshold: Math.max(1, Math.min(18, objectLimitThreshold)),
       objectLimitCount: Math.max(10, Math.min(500, objectLimitCount)),
-    });
+      telemetryEnabled: telemetryEnabled,
+    };
+    onSettingsChange(newSettings);
+    AsyncStorage.setItem('telemetryEnabled', JSON.stringify(telemetryEnabled));
     onClose();
   };
 
@@ -958,6 +962,19 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
             <Text style={styles.settingsHint}>
               Nechte prázdné pro výchozí OSM. Použijte {'{z}'}, {'{x}'}, {'{y}'} jako placeholdery.
             </Text>
+
+            <View style={styles.settingsToggleContainer}>
+              <View style={styles.settingsToggleLabel}>
+                <Text style={styles.settingsLabel}>Telemetrie</Text>
+                <Text style={styles.settingsToggleHint}>Nahrávání anonymních statistik užívání</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.settingsToggle, telemetryEnabled && styles.settingsToggleActive]}
+                onPress={() => setTelemetryEnabled(!telemetryEnabled)}
+              >
+                <View style={[styles.settingsToggleButton, telemetryEnabled && styles.settingsToggleButtonActive]} />
+              </TouchableOpacity>
+            </View>
 
             {/* Zoom Limit Settings */}
             <View style={{ borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 16, paddingTop: 16 }}>
@@ -1099,6 +1116,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [uploadLocation, setUploadLocation] = useState(null);
   const [selectedTag, setSelectedTag] = useState('');
+  const [selectedSupplementaryTags, setSelectedSupplementaryTags] = useState([]);
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -1481,7 +1499,11 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
         formData.append('cmd', 'add');
         formData.append('lat', String(uploadLocation.latitude));
         formData.append('lon', String(uploadLocation.longitude));
-        formData.append('gp_type', selectedTag);
+        let gp_type = selectedTag;
+        if (selectedSupplementaryTags.length > 0) {
+          gp_type += ';' + selectedSupplementaryTags.join(';');
+        }
+        formData.append('gp_type', gp_type);
         if (reference) formData.append('ref', reference);
         if (note) formData.append('note', note);
 
@@ -1501,6 +1523,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
           setSelectedImage(null);
           setUploadLocation(null);
           setSelectedTag('');
+          setSelectedSupplementaryTags([]);
           setReference('');
           setNote('');
           fetchPhotos();
@@ -1604,6 +1627,27 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
                   onPress={() => setSelectedTag(tag.name)}
                 >
                   <Text style={[styles.tagChipText, selectedTag === tag.name && styles.tagChipTextSelected]}>
+                    {tag.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.uploadLabel}>{Icons.tag} Doplňovací tagy (volitelné)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsScroll}>
+              {tags.flatMap(tag => tag.secondary || []).map((tag) => (
+                <TouchableOpacity
+                  key={tag.id}
+                  style={[styles.tagChip, selectedSupplementaryTags.includes(tag.name) && styles.tagChipSelected]}
+                  onPress={() => {
+                    setSelectedSupplementaryTags(prev => 
+                      prev.includes(tag.name) 
+                        ? prev.filter(t => t !== tag.name)
+                        : [...prev, tag.name]
+                    );
+                  }}
+                >
+                  <Text style={[styles.tagChipText, selectedSupplementaryTags.includes(tag.name) && styles.tagChipTextSelected]}>
                     {tag.name}
                   </Text>
                 </TouchableOpacity>
@@ -2988,7 +3032,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.1.4</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.5</Text>
           </View>
         </View>
         
@@ -3076,6 +3120,13 @@ const MoreTab = ({ settings, onSettingsChange }) => {
         </Text>
       </Card>
 
+      {/* Legal text */}
+      <Card style={styles.legalCard}>
+        <Text style={styles.legalText}>
+          Používáním této aplikaci souhlasíte s podmínkami Fody (viz. osm.fit.vutbr.cz/fody) a OpenStreetMap.
+        </Text>
+      </Card>
+
       <SettingsModal
         visible={settingsModalVisible}
         onClose={() => setSettingsModalVisible(false)}
@@ -3095,6 +3146,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginModalVisible, setLoginModalVisible] = useState(false);
+  const [userProfileVisible, setUserProfileVisible] = useState(false);
   const [settings, setSettings] = useState({
     photoLimit: 160,
     customTileUrl: '',
@@ -3102,11 +3154,12 @@ export default function App() {
     objectLimitEnabled: true,
     objectLimitThreshold: 10,
     objectLimitCount: 100,
+    telemetryEnabled: true,
   });
   const [appStartTime] = useState(new Date());
   const [deviceId, setDeviceId] = useState(null);
 
-  // Generuj či načti device ID
+  // Generuj či načti device ID a načti nastavení
   useEffect(() => {
     const initializeDeviceId = async () => {
       try {
@@ -3117,6 +3170,12 @@ export default function App() {
           await AsyncStorage.setItem('deviceId', id);
         }
         setDeviceId(id);
+
+        // Načti telemetry nastavení
+        const telemetryEnabled = await AsyncStorage.getItem('telemetryEnabled');
+        if (telemetryEnabled !== null) {
+          setSettings(prev => ({ ...prev, telemetryEnabled: JSON.parse(telemetryEnabled) }));
+        }
       } catch (error) {
         console.error('Error managing device ID:', error);
       }
@@ -3156,7 +3215,11 @@ export default function App() {
   };
 
   // Function to send anonymous usage data
-const sendUsageData = async (data) => {
+const sendUsageData = async (data, telemetryEnabled = true) => {
+  if (!telemetryEnabled) {
+    return; // Don't send if telemetry is disabled
+  }
+  
   try {
     const response = await fetch('https://fluffini.cz/upload_usage_data', {
       method: 'POST',
@@ -3185,7 +3248,7 @@ const collectUsageData = () => {
     screenWidth: SCREEN_WIDTH,
     screenHeight: SCREEN_HEIGHT,
     platform: Platform.OS,
-    version: '1.1.4',
+    version: '1.1.5',
     sessionDurationMs: sessionDuration,
     osmUser: isLoggedIn ? user : null,
     activeTab: activeTab,
@@ -3195,7 +3258,7 @@ const collectUsageData = () => {
     }
   };
 
-  sendUsageData(usageData);
+  sendUsageData(usageData, settings.telemetryEnabled);
 };
 
 // Call collectUsageData periodically
@@ -3230,10 +3293,13 @@ useEffect(() => {
           }
           rightComponent={
             isLoggedIn ? (
-              <View style={styles.headerUserBadge}>
+              <TouchableOpacity 
+                style={styles.headerUserBadge}
+                onPress={() => setUserProfileVisible(true)}
+              >
                 <Text style={styles.headerUserIcon}>{Icons.user}</Text>
                 <Text style={styles.headerUserName} numberOfLines={1}>{user}</Text>
-              </View>
+              </TouchableOpacity>
             ) : null
           }
         />
@@ -3300,6 +3366,13 @@ useEffect(() => {
           visible={loginModalVisible}
           onClose={() => setLoginModalVisible(false)}
           onLoginSuccess={handleLoginSuccess}
+        />
+
+        {/* User Profile Modal */}
+        <UserProfileModal
+          visible={userProfileVisible}
+          username={user}
+          onClose={() => setUserProfileVisible(false)}
         />
       </SafeAreaView>
     </AuthContext.Provider>
