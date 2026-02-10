@@ -2266,7 +2266,8 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       layers: '0',
       transparent: true,
       format: 'image/png',
-      attribution: '(C) ČÚZK'
+      attribution: '(C) ČÚZK',
+      opacity: 0.4
     });
 
     // Panoramax layer
