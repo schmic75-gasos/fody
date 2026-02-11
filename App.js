@@ -556,10 +556,21 @@ const GamificationProvider = ({ children }) => {
           await AsyncStorage.setItem('gamificationEnabled', 'true');
         }
 
-        // Sync with server
-        if (gamificationEnabled !== false) {
-          await syncWithServer(token);
+        // Check if first login achievement should be awarded
+        const hasLoggedIn = await AsyncStorage.getItem('hasLoggedIn');
+        if (!hasLoggedIn && gamificationEnabled !== false) {
+          unlockAchievement('first_login');
+          unlockAchievement('complete_profile');
+          await AsyncStorage.setItem('hasLoggedIn', 'true');
         }
+
+        // Sync with server after initialization
+        // We need to use setTimeout to avoid dependency issues
+        setTimeout(() => {
+          if (gamificationEnabled !== false) {
+            syncWithServer(token);
+          }
+        }, 1000);
       } catch (error) {
         console.error('Error initializing gamification:', error);
       }
@@ -582,12 +593,30 @@ const GamificationProvider = ({ children }) => {
       // Fetch server data
       const response = await fetch(`${GAMIFICATION_SERVER}/api/gamification/status/${token}`);
       if (response.ok) {
-        const serverData = await response.json();
+        // Handle non-JSON responses gracefully
+        const text = await response.text();
+        let serverData;
+        try {
+          serverData = JSON.parse(text);
+        } catch (e) {
+          console.warn('Server returned non-JSON response:', text);
+          serverData = {};
+        }
         
-        // Merge data (server wins for persistent state)
-        const mergedPoints = Math.max(local.points || 0, serverData.points || 0);
-        const mergedAchievements = [...new Set([...(local.achievements || []), ...(serverData.achievements || [])])];
-        const mergedTasks = [...new Set([...(local.completedTasks || []), ...(serverData.completedTasks || [])])];
+        // Safely merge achievements - ensure both are arrays
+        const localAchievements = Array.isArray(local.achievements) ? local.achievements : [];
+        const serverAchievements = Array.isArray(serverData.achievements) ? serverData.achievements : [];
+        const mergedAchievements = [...new Set([...localAchievements, ...serverAchievements])];
+        
+        // Safely merge completed tasks - ensure both are arrays
+        const localTasks = Array.isArray(local.completedTasks) ? local.completedTasks : [];
+        const serverTasks = Array.isArray(serverData.completedTasks) ? serverData.completedTasks : [];
+        const mergedTasks = [...new Set([...localTasks, ...serverTasks])];
+        
+        // Merge points
+        const localPoints = typeof local.points === 'number' ? local.points : 0;
+        const serverPoints = typeof serverData.points === 'number' ? serverData.points : 0;
+        const mergedPoints = Math.max(localPoints, serverPoints);
         
         setPoints(mergedPoints);
         setLevel(serverData.level || calculateLevel(mergedPoints));
@@ -1678,6 +1707,7 @@ const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
 const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
   const [noteText, setNoteText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const { awardPoints, unlockAchievement, checkTask, gamificationEnabled } = useGamification();
 
   const submitNote = async () => {
     if (!noteText.trim()) {
@@ -1695,6 +1725,12 @@ const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
       });
 
       if (response.ok) {
+        // Gamification: Award points for creating OSM note
+        if (gamificationEnabled) {
+          awardPoints(POINT_VALUES.osmNoteCreate, 'osm_note_create');
+          unlockAchievement('note_creator');
+          checkTask('task_add_note');
+        }
         Alert.alert('Úspěch', 'Poznámka byla vytvořena');
         setNoteText('');
         onSuccess && onSuccess();
@@ -1871,7 +1907,7 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
 
             <Text style={styles.settingsLabel}>Vlastní mapový podklad (URL)</Text>
             <TextInput
-              style={[styles.settingsInput, { marginBottom: 8 }]}
+              style={styles.settingsInput}
               value={customTileUrl}
               onChangeText={setCustomTileUrl}
               placeholder="https://tile.example.com/{z}/{x}/{y}.png"
@@ -1879,7 +1915,7 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
               autoCapitalize="none"
             />
             <Text style={styles.settingsHint}>
-              Nechte prázdné pro výchozí OSM. Použijte {'{z}'}, {'{x}'}, {'{y}'} jako placeholdery.
+              Nechte prázdné pro výchozí OSM. Použijte zástupné znaky {'{'}z{'}'}, {'{'}x{'}'}, {'{'}y{'}'}.
             </Text>
 
             <View style={styles.settingsToggleContainer}>
@@ -2017,64 +2053,332 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
 // ============================================
 
 // Layers Modal Component
-const LayersModal = ({ visible, onClose, contoursEnabled, onContoursChange, panoramaxEnabled, onPanoramaxChange }) => (
-  <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-    <SafeAreaView style={styles.modalContainer}>
-      <View style={styles.modalHeader}>
-        <Text style={styles.modalTitle}>{Icons.map} Vrstvy mapy</Text>
-        <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
-          <Text style={styles.modalCloseText}>{Icons.close}</Text>
-        </TouchableOpacity>
-      </View>
+const LayersModal = ({ visible, onClose, contoursEnabled, onContoursChange, panoramaxEnabled, onPanoramaxChange, webViewRef, mapLoaded }) => {
+  const [customLayerEnabled, setCustomLayerEnabled] = useState(false);
+  const [customLayerUrl, setCustomLayerUrl] = useState('');
+  const [customLayerOpacity, setCustomLayerOpacity] = useState(50);
+  const [contoursOpacity, setContoursOpacity] = useState(40);
+  const [panoramaxOpacity, setPanoramaxOpacity] = useState(50);
+  
+  // Přidat stav pro uložené vlastní vrstvy
+  const [savedLayers, setSavedLayers] = useState([]);
+  
+  useEffect(() => {
+    if (visible) {
+      loadSavedLayers();
+    }
+  }, [visible]);
+  
+  const loadSavedLayers = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('customLayers');
+      if (saved) {
+        setSavedLayers(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Chyba při načítání uložených vrstev:', error);
+    }
+  };
 
-      <ScrollView style={styles.layersContent} contentContainerStyle={styles.layersContentContainer}>
-        <Text style={styles.layersSection}>Dostupné vrstvy</Text>
+  const applyCustomLayer = (url, opacity) => {
+    if (webViewRef && webViewRef.current && mapLoaded) {
+      // Escape the URL for JavaScript injection
+      const escapedUrl = url.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+      webViewRef.current.injectJavaScript(`
+        if (window.customLayer) {
+          map.removeLayer(window.customLayer);
+        }
+        window.customLayer = L.tileLayer('${escapedUrl}', {
+          maxZoom: 19,
+          attribution: 'Custom Layer',
+          opacity: ${opacity / 100}
+        }).addTo(map);
+        window.customLayerEnabled = true;
+        window.customLayerOpacity = ${opacity / 100};
+        true;
+      `);
+    }
+  };
 
-        <Card style={styles.layerItem}>
-          <View style={styles.layerHeader}>
-            <View>
-              <Text style={styles.layerTitle}>Vrstevnice ČR</Text>
-              <Text style={styles.layerDescription}>Vrstevnice terénní plochy od ČÚZK</Text>
+  const toggleCustomLayer = (enabled, url, opacity) => {
+    if (enabled && url) {
+      setCustomLayerEnabled(true);
+      applyCustomLayer(url, opacity);
+    } else if (webViewRef && webViewRef.current && mapLoaded) {
+      setCustomLayerEnabled(false);
+      webViewRef.current.injectJavaScript(`
+        if (window.customLayer) {
+          map.removeLayer(window.customLayer);
+          window.customLayer = null;
+        }
+        window.customLayerEnabled = false;
+        true;
+      `);
+    }
+  };
+
+  const saveCustomLayer = async () => {
+    if (!customLayerUrl.trim()) {
+      Alert.alert('Chyba', 'Zadejte URL vrstvy');
+      return;
+    }
+    
+    const newLayer = {
+      id: 'custom_' + Date.now(),
+      name: customLayerUrl.split('/').pop() || 'Vlastní vrstva',
+      url: customLayerUrl.trim(),
+      opacity: customLayerOpacity
+    };
+    
+    const updatedLayers = [...savedLayers, newLayer];
+    setSavedLayers(updatedLayers);
+    
+    try {
+      await AsyncStorage.setItem('customLayers', JSON.stringify(updatedLayers));
+      Alert.alert('Úspěch', 'Vrstva byla uložena');
+    } catch (error) {
+      console.error('Chyba při ukládání vrstvy:', error);
+    }
+  };
+
+  const deleteSavedLayer = async (layerId) => {
+    const updatedLayers = savedLayers.filter(l => l.id !== layerId);
+    setSavedLayers(updatedLayers);
+    
+    try {
+      await AsyncStorage.setItem('customLayers', JSON.stringify(updatedLayers));
+    } catch (error) {
+      console.error('Chyba při mazání vrstvy:', error);
+    }
+  };
+
+  const applySavedLayer = (layer) => {
+    if (webViewRef && webViewRef.current && mapLoaded) {
+      const escapedUrl = layer.url.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+      webViewRef.current.injectJavaScript(`
+        if (window.customLayer) {
+          map.removeLayer(window.customLayer);
+        }
+        window.customLayer = L.tileLayer('${escapedUrl}', {
+          maxZoom: 19,
+          attribution: 'Custom Layer',
+          opacity: ${layer.opacity / 100}
+        }).addTo(map);
+        window.customLayerEnabled = true;
+        window.customLayerOpacity = ${layer.opacity / 100};
+        true;
+      `);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{Icons.map} Vrstvy mapy</Text>
+          <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>{Icons.close}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.layersContent} contentContainerStyle={styles.layersContentContainer}>
+          <Text style={styles.layersSection}>Vestavěné vrstvy</Text>
+
+          {/* Vrstevnice ČR */}
+          <Card style={styles.layerItem}>
+            <View style={styles.layerHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.layerTitle}>Vrstevnice ČR</Text>
+                <Text style={styles.layerDescription}>Vrstevnice terénní plochy od ČÚZK</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.layerToggle, contoursEnabled && styles.layerToggleActive]}
+                onPress={() => {
+                  onContoursChange(!contoursEnabled);
+                  if (webViewRef && webViewRef.current && mapLoaded) {
+                    webViewRef.current.injectJavaScript('window.toggleLayer(\'contours\', ' + String(!contoursEnabled) + '); true;');
+                  }
+                }}
+              >
+                <View style={[styles.layerToggleButton, contoursEnabled && styles.layerToggleButtonActive]} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[styles.layerToggle, contoursEnabled && styles.layerToggleActive]}
-              onPress={() => onContoursChange(!contoursEnabled)}
-            >
-              <View style={[styles.layerToggleButton, contoursEnabled && styles.layerToggleButtonActive]} />
-            </TouchableOpacity>
-          </View>
-        </Card>
+            {contoursEnabled && (
+              <View style={styles.layerOpacityControl}>
+                <Text style={styles.layerOpacityLabel}>Průhlednost: {contoursOpacity}%</Text>
+                <CustomSlider
+                  value={contoursOpacity}
+                  onValueChange={(val) => {
+                    setContoursOpacity(val);
+                    if (webViewRef && webViewRef.current && mapLoaded) {
+                      webViewRef.current.injectJavaScript(`
+                        if (window.contoursLayer) {
+                          window.contoursLayer.setOpacity(${val / 100});
+                        }
+                        true;
+                      `);
+                    }
+                  }}
+                  minimumValue={10}
+                  maximumValue={100}
+                  step={5}
+                />
+              </View>
+            )}
+          </Card>
 
-        <Card style={styles.layerItem}>
-          <View style={styles.layerHeader}>
-            <View>
-              <Text style={styles.layerTitle}>Panoramax</Text>
-              <Text style={styles.layerDescription}>Street-level imagery z různých zdrojů</Text>
+          {/* Panoramax */}
+          <Card style={styles.layerItem}>
+            <View style={styles.layerHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.layerTitle}>Panoramax</Text>
+                <Text style={styles.layerDescription}>Street-level imagery z různých zdrojů</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.layerToggle, panoramaxEnabled && styles.layerToggleActive]}
+                onPress={() => {
+                  onPanoramaxChange(!panoramaxEnabled);
+                  if (webViewRef && webViewRef.current && mapLoaded) {
+                    webViewRef.current.injectJavaScript('window.toggleLayer(\'panoramax\', ' + String(!panoramaxEnabled) + '); true;');
+                  }
+                }}
+              >
+                <View style={[styles.layerToggleButton, panoramaxEnabled && styles.layerToggleButtonActive]} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[styles.layerToggle, panoramaxEnabled && styles.layerToggleActive]}
-              onPress={() => onPanoramaxChange(!panoramaxEnabled)}
-            >
-              <View style={[styles.layerToggleButton, panoramaxEnabled && styles.layerToggleButtonActive]} />
-            </TouchableOpacity>
+            {panoramaxEnabled && (
+              <View style={styles.layerOpacityControl}>
+                <Text style={styles.layerOpacityLabel}>Průhlednost: {panoramaxOpacity}%</Text>
+                <CustomSlider
+                  value={panoramaxOpacity}
+                  onValueChange={(val) => {
+                    setPanoramaxOpacity(val);
+                    if (webViewRef && webViewRef.current && mapLoaded) {
+                      webViewRef.current.injectJavaScript(`
+                        if (window.panoramaxLayer) {
+                          window.panoramaxLayer.setOpacity(${val / 100});
+                        }
+                        true;
+                      `);
+                    }
+                  }}
+                  minimumValue={10}
+                  maximumValue={100}
+                  step={5}
+                />
+              </View>
+            )}
+          </Card>
+
+          {/* Custom Layer URL */}
+          <Text style={[styles.layersSection, { marginTop: 20 }]}>{Icons.web} Vlastní vrstva</Text>
+          
+          <Card style={styles.customLayerCard}>
+            <Text style={styles.customLayerLabel}>URL šablona dlaždic</Text>
+            <TextInput
+              style={styles.customLayerInput}
+              value={customLayerUrl}
+              onChangeText={setCustomLayerUrl}
+              placeholder="https://tile.example.com/{z}/{x}/{y}.png"
+              placeholderTextColor={COLORS.textSecondary}
+              autoCapitalize="none"
+            />
+            
+            <Text style={styles.customLayerLabel}>Průhlednost: {customLayerOpacity}%</Text>
+            <CustomSlider
+              value={customLayerOpacity}
+              onValueChange={setCustomLayerOpacity}
+              minimumValue={10}
+              maximumValue={100}
+              step={5}
+            />
+            
+            <View style={styles.customLayerButtons}>
+              <Button
+                title="Použít vrstvu"
+                onPress={() => toggleCustomLayer(true, customLayerUrl, customLayerOpacity)}
+                disabled={!customLayerUrl.trim()}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <Button
+                title="Vypnout"
+                variant="outline"
+                onPress={() => toggleCustomLayer(false, '', 0)}
+                style={{ flex: 1 }}
+              />
+            </View>
+            
+            <Button
+              title="💾 Uložit vrstvu"
+              variant="secondary"
+              onPress={saveCustomLayer}
+              disabled={!customLayerUrl.trim()}
+              style={{ marginTop: 8 }}
+            />
+          </Card>
+
+          {/* Placeholder examples */}
+          <View style={styles.layerExamples}>
+            <Text style={styles.layerExamplesTitle}>Kompatibilní formáty:</Text>
+            <Text style={styles.layerExampleItem}>• OpenStreetMap: https://tile.openstreetmap.org/HODNOTAZ/HODNOTAX/HODNOTAY.png</Text>
+            <Text style={styles.layerExampleNote}>
+              Nahraďte zástupné znaky z, x, y za odpovídající hodnoty dlaždic.
+              Pro subdomény použijte s.
+            </Text>
           </View>
-        </Card>
 
-        <Text style={styles.layersInfo}>
-          💡 Tip: Vrstvy se přidávají nad výchozí mapový podklad a mohou ovlivnit výkon mapy.
-        </Text>
-      </ScrollView>
+          {/* Uložené vrstvy */}
+          {savedLayers.length > 0 && (
+            <>
+              <Text style={[styles.layersSection, { marginTop: 20 }]}>{Icons.layers} Uložené vrstvy</Text>
+              {savedLayers.map((layer) => (
+                <Card key={layer.id} style={styles.savedLayerItem}>
+                  <View style={styles.savedLayerContent}>
+                    <Text style={styles.savedLayerName}>{layer.name}</Text>
+                    <Text style={styles.savedLayerUrl} numberOfLines={1}>{layer.url}</Text>
+                  </View>
+                  <View style={styles.savedLayerActions}>
+                    <TouchableOpacity 
+                      style={styles.savedLayerBtn}
+                      onPress={() => applySavedLayer(layer)}
+                    >
+                      <Text style={styles.savedLayerBtnText}>Použít</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.savedLayerBtn, styles.savedLayerBtnDelete]}
+                      onPress={() => deleteSavedLayer(layer.id)}
+                    >
+                      <Text style={styles.savedLayerBtnDeleteText}>Smazat</Text>
+                    </TouchableOpacity>
+                  </View>
+                </Card>
+              ))}
+            </>
+          )}
 
-      <View style={styles.layersButtons}>
-        <Button title="Zavřít" onPress={onClose} />
-      </View>
-    </SafeAreaView>
-  </Modal>
-);
+          <Text style={styles.layersInfo}>
+            💡 Tip: Vrstvy se přidávají nad výchozí mapový podklad a mohou ovlivnit výkon mapy.
+          </Text>
+        </ScrollView>
+
+        <View style={styles.layersButtons}>
+          <Button title="Zavřít" onPress={onClose} />
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+};
 
 // FODY TAB - Hlavni funkcionalita
 const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
   const { user, isLoggedIn, login, logout } = useAuth();
+  const { checkTask, awardPoints, unlockAchievement, gamificationEnabled } = useGamification();
+  
+  // Track tab exploration
+  const tabsExplored = useRef(new Set(['browse']));
+  const hasLoggedFirstPhoto = useRef(false);
+  const hasLoggedSettings = useRef(false);
+  
   const [photos, setPhotos] = useState([]);
   const [stats, setStats] = useState(null);
   const [tags, setTags] = useState([]);
@@ -2231,6 +2535,10 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
 
   // Otevreni detailu fotky
   const openPhotoDetail = (photo) => {
+    // Award points for viewing photo
+    if (gamificationEnabled) {
+      awardPoints(POINT_VALUES.mapView, 'photo_view', { photoId: photo.id });
+    }
     setSelectedPhoto(photo);
     setModalVisible(true);
   };
@@ -2472,14 +2780,6 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
 
       setUploading(true);
 
-      // Record upload attempt start
-      recordUploadAttempt(false, {
-        photoType: selectedTag,
-        hasReference: !!reference,
-        hasNote: !!note,
-        uploadSource: 'fody_tab',
-      });
-
       try {
         const formData = new FormData();
         formData.append('uploadedfile', {
@@ -2510,17 +2810,48 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
         const result = await response.text();
         
         if (response.ok && result.startsWith('1')) {
-          // Record successful upload
-          recordUploadAttempt(true, {
-            photoType: selectedTag,
-            hasReference: !!reference,
-            hasNote: !!note,
-            uploadSource: 'fody_tab',
-            coordinates: {
-              lat: uploadLocation.latitude,
-              lon: uploadLocation.longitude,
-            },
-          });
+          // Gamification: Award points for successful upload
+          if (gamificationEnabled) {
+            // Unlock first photo achievement
+            if (!hasLoggedFirstPhoto.current) {
+              unlockAchievement('first_photo');
+              hasLoggedFirstPhoto.current = true;
+            }
+            
+            // Unlock quality contributor if note was added
+            if (note && note.trim()) {
+              unlockAchievement('quality_contributor');
+            }
+            
+            // Check for photo collector achievements
+            const uploadedCount = await AsyncStorage.getItem('totalUploads') || '0';
+            const newCount = parseInt(uploadedCount) + 1;
+            await AsyncStorage.setItem('totalUploads', String(newCount));
+            
+            if (newCount >= 10) {
+              unlockAchievement('photo_collector_10');
+            }
+            if (newCount >= 50) {
+              unlockAchievement('photo_collector_50');
+            }
+            
+            // Award points based on upload quality
+            let pointsToAward = POINT_VALUES.photoUpload;
+            if (note && note.trim()) {
+              pointsToAward += POINT_VALUES.photoUploadWithNote;
+            }
+            if (reference && reference.trim()) {
+              pointsToAward += POINT_VALUES.photoUploadWithReference;
+            }
+            
+            awardPoints(pointsToAward, 'photo_upload', {
+              photoType: selectedTag,
+              hasReference: !!reference,
+              hasNote: !!note,
+            });
+            
+            checkTask('task_first_upload');
+          }
           
           Alert.alert('Úspěch', 'Fotka byla úspěšně nahrána!');
           setSelectedImage(null);
@@ -2532,18 +2863,8 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
           fetchPhotos();
           fetchStats();
         } else {
-          // Record failed upload
-          recordUploadAttempt(false, {
-            photoType: selectedTag,
-            hasReference: !!reference,
-            hasNote: !!note,
-            uploadSource: 'fody_tab',
-            error: result,
-          });
-          
           // Record error
           recordError('upload_failed', result);
-          
           Alert.alert('Chyba', `nahrávání selhalo: ${result}`);
         }
       } catch (error) {
@@ -2652,22 +2973,24 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
 
             <Text style={styles.uploadLabel}>{Icons.tag} Doplňovací tagy (volitelné)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsScroll}>
-              {tags.flatMap(tag => tag.secondary || []).map((tag) => (
-                <TouchableOpacity
-                  key={`supp-tag-${tag.id}`}
-                  style={[styles.tagChip, selectedSupplementaryTags.includes(tag.name) && styles.tagChipSelected]}
-                  onPress={() => {
-                    setSelectedSupplementaryTags(prev => 
-                      prev.includes(tag.name) 
-                        ? prev.filter(t => t !== tag.name)
-                        : [...prev, tag.name]
-                    );
-                  }}
-                >
-                  <Text style={[styles.tagChipText, selectedSupplementaryTags.includes(tag.name) && styles.tagChipTextSelected]}>
-                    {tag.name}
-                  </Text>
-                </TouchableOpacity>
+              {tags.map((primaryTag) => (
+                primaryTag.secondary && primaryTag.secondary.map((tag) => (
+                  <TouchableOpacity
+                    key={`supp-tag-${primaryTag.name}-${tag.id}`}
+                    style={[styles.tagChip, selectedSupplementaryTags.includes(tag.name) && styles.tagChipSelected]}
+                    onPress={() => {
+                      setSelectedSupplementaryTags(prev => 
+                        prev.includes(tag.name) 
+                          ? prev.filter(t => t !== tag.name)
+                          : [...prev, tag.name]
+                      );
+                    }}
+                  >
+                    <Text style={[styles.tagChipText, selectedSupplementaryTags.includes(tag.name) && styles.tagChipTextSelected]}>
+                      {tag.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))
               ))}
             </ScrollView>
 
@@ -2806,7 +3129,18 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
       <View style={styles.sectionNav}>
         <TouchableOpacity
           style={[styles.sectionNavItem, activeSection === 'browse' && styles.sectionNavItemActive]}
-          onPress={() => setActiveSection('browse')}
+          onPress={() => {
+            if (activeSection !== 'browse') {
+              tabsExplored.current.add('browse');
+              checkTask('task_explore_map');
+              checkTask('task_check_stats');
+              // Check for exploring all tabs achievement
+              if (gamificationEnabled && tabsExplored.current.size >= 3) {
+                unlockAchievement('explorer');
+              }
+            }
+            setActiveSection('browse');
+          }}
         >
           <Text style={[styles.sectionNavText, activeSection === 'browse' && styles.sectionNavTextActive]}>
             {Icons.photo} Prohlížet
@@ -2814,7 +3148,13 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.sectionNavItem, activeSection === 'upload' && styles.sectionNavItemActive]}
-          onPress={() => setActiveSection('upload')}
+          onPress={() => {
+            tabsExplored.current.add('upload');
+            if (gamificationEnabled && tabsExplored.current.size >= 3) {
+              unlockAchievement('explorer');
+            }
+            setActiveSection('upload');
+          }}
         >
           <Text style={[styles.sectionNavText, activeSection === 'upload' && styles.sectionNavTextActive]}>
             {Icons.upload} Nahrát
@@ -2822,7 +3162,15 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.sectionNavItem, activeSection === 'stats' && styles.sectionNavItemActive]}
-          onPress={() => setActiveSection('stats')}
+          onPress={() => {
+            tabsExplored.current.add('stats');
+            checkTask('task_check_stats');
+            if (gamificationEnabled && tabsExplored.current.size >= 3) {
+              unlockAchievement('explorer');
+              awardPoints(POINT_VALUES.exploreAllTabs, 'explore_all_tabs');
+            }
+            setActiveSection('stats');
+          }}
         >
           <Text style={[styles.sectionNavText, activeSection === 'stats' && styles.sectionNavTextActive]}>
             {Icons.stats} Statistiky
@@ -2862,7 +3210,13 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
 // MAPA TAB - OSM mapa s moznosti nahrávání, polohou uzivatele a rozcesniky
 const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadComplete, settings }) => {
   const { isLoggedIn, login } = useAuth();
+  const { awardPoints, unlockAchievement, checkTask, gamificationEnabled } = useGamification();
+  
   const webViewRef = useRef(null);
+  
+  // Track map usage for gamification
+  const mapUsageStart = useRef(new Date());
+  const hasLoggedMapAchievement = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [photos, setPhotos] = useState([]);
   const [uploadMode, setUploadMode] = useState(externalUploadMode || false);
@@ -3547,6 +3901,13 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
 
       if (data.type === 'mapLoaded') {
         setMapLoaded(true);
+        // Gamification: Award points for using map
+        if (gamificationEnabled && !hasLoggedMapAchievement.current) {
+          awardPoints(POINT_VALUES.mapView, 'map_view');
+          unlockAchievement('map_navigation');
+          checkTask('task_explore_map');
+          hasLoggedMapAchievement.current = true;
+        }
         if (userLocation) {
           webViewRef.current?.injectJavaScript(`
             window.setUserLocation(${userLocation.latitude}, ${userLocation.longitude});
@@ -4018,6 +4379,8 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           }
         }}
         panoramaxEnabled={panoramaxEnabled}
+        webViewRef={webViewRef}
+        mapLoaded={mapLoaded}
         onPanoramaxChange={(enabled) => {
           setPanoramaxEnabled(enabled);
           if (webViewRef.current && mapLoaded) {
@@ -4043,6 +4406,8 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
 // VICE TAB - Info, odkazy, projekt mesice
 const MoreTab = ({ settings, onSettingsChange }) => {
   const { user, isLoggedIn, login, logout } = useAuth();
+  const { checkTask, awardPoints, unlockAchievement, gamificationEnabled } = useGamification();
+  
   const [projectMonth, setProjectMonth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -4051,6 +4416,10 @@ const MoreTab = ({ settings, onSettingsChange }) => {
   const [panoramaxViewerVisible, setPanoramaxViewerVisible] = useState(false);
   const [selectedPanoramax, setSelectedPanoramax] = useState({ id: null, sequence: null });
   const [gamificationModalVisible, setGamificationModalVisible] = useState(false);
+  
+  // Track settings view for gamification
+  const hasLoggedSettings = useRef(false);
+  const hasViewedProject = useRef(false);
 
   useEffect(() => {
     fetchProjectMonth();
@@ -4130,6 +4499,14 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 16 }} />
         ) : projectMonth ? (
           <View>
+            {(() => {
+              // Gamification: Award points for viewing project of the month
+              if (gamificationEnabled && !hasViewedProject.current) {
+                hasViewedProject.current = true;
+                checkTask('task_view_project');
+              }
+              return null;
+            })()}
             <Text style={styles.projectText}>{projectMonth.name}</Text>
             <View style={styles.projectMeta}>
               <Badge text={getProjectTypeLabel(projectMonth.type)} variant="info" />
@@ -4160,7 +4537,15 @@ const MoreTab = ({ settings, onSettingsChange }) => {
       </Card>
 
       {/* Nastaveni */}
-      <Card style={styles.linkCard} onPress={() => setSettingsModalVisible(true)}>
+      <Card style={styles.linkCard} onPress={() => {
+        if (gamificationEnabled && !hasLoggedSettings.current) {
+          awardPoints(POINT_VALUES.settingsView, 'settings_view');
+          unlockAchievement('settings_guru');
+          checkTask('task_change_settings');
+          hasLoggedSettings.current = true;
+        }
+        setSettingsModalVisible(true);
+      }}>
         <Text style={styles.linkIcon}>{Icons.settings}</Text>
         <View style={styles.linkContent}>
           <Text style={styles.linkTitle}>Nastavení</Text>
@@ -4425,6 +4810,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
 // ============================================
 
 export default function App() {
+  const { unlockAchievement, gamificationEnabled } = useGamification();
   const [activeTab, setActiveTab] = useState('fody');
   const [user, setUser] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -4493,6 +4879,12 @@ export default function App() {
     setUser(username);
     setIsLoggedIn(true);
     setLoginModalVisible(false);
+    
+    // Gamification: Unlock achievements for logging in
+    if (gamificationEnabled) {
+      unlockAchievement('first_login');
+      unlockAchievement('complete_profile');
+    }
     
     // Record login event
     recordEvent('osm_login_success', {
@@ -6555,6 +6947,114 @@ const styles = StyleSheet.create({
   layerToggleButtonActive: {
     marginLeft: 'auto',
     marginRight: 2,
+  },
+  layerOpacityControl: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  layerOpacityLabel: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  customLayerCard: {
+    marginBottom: 16,
+  },
+  customLayerLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  customLayerInput: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 8,
+  },
+  customLayerButtons: {
+    flexDirection: 'row',
+    marginTop: 12,
+  },
+  layerExamples: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  layerExamplesTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  layerExampleItem: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  layerExampleCode: {
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontSize: 11,
+    color: COLORS.secondary,
+  },
+  layerExampleNote: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  savedLayerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 8,
+  },
+  savedLayerContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  savedLayerName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  savedLayerUrl: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  savedLayerActions: {
+    flexDirection: 'row',
+  },
+  savedLayerBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: COLORS.primary + '20',
+    borderRadius: 6,
+    marginLeft: 4,
+  },
+  savedLayerBtnText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  savedLayerBtnDelete: {
+    backgroundColor: COLORS.error + '20',
+  },
+  savedLayerBtnDeleteText: {
+    fontSize: 12,
+    color: COLORS.error,
+    fontWeight: '600',
   },
   layersInfo: {
     fontSize: 13,

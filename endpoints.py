@@ -32,12 +32,16 @@ DATA_DIR = 'gamification_data'
 # Ensure data directory exists
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# File paths
-POINTS_FILE = os.path.join(DATA_DIR, 'points.json')
-ACHIEVEMENTS_FILE = os.path.join(DATA_DIR, 'achievements.json')
-TASKS_FILE = os.path.join(DATA_DIR, 'tasks.json')
-USERS_FILE = os.path.join(DATA_DIR, 'users.json')
-SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
+# File paths - using fody-specific directory to avoid conflicts
+FODY_DATA_DIR = 'fody_gamification_data'
+FODY_POINTS_FILE = os.path.join(FODY_DATA_DIR, 'points.json')
+FODY_ACHIEVEMENTS_FILE = os.path.join(FODY_DATA_DIR, 'achievements.json')
+FODY_TASKS_FILE = os.path.join(FODY_DATA_DIR, 'tasks.json')
+FODY_USERS_FILE = os.path.join(FODY_DATA_DIR, 'users.json')
+FODY_SETTINGS_FILE = os.path.join(FODY_DATA_DIR, 'settings.json')
+
+# Ensure fody data directory exists
+os.makedirs(FODY_DATA_DIR, exist_ok=True)
 
 # Default achievements definition
 DEFAULT_ACHIEVEMENTS = {
@@ -227,8 +231,8 @@ def ensure_file(filepath, default=None):
             json.dump(default if default is not None else {}, f, ensure_ascii=False, indent=2)
 
 
-def load_json(filepath):
-    """Load JSON from file."""
+def load_json_fody(filepath):
+    """Load JSON from fody-specific file."""
     ensure_file(filepath)
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -237,15 +241,15 @@ def load_json(filepath):
         return {}
 
 
-def save_json(filepath, data):
-    """Save data to JSON file."""
+def save_json_fody(filepath, data):
+    """Save data to fody-specific JSON file."""
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def get_user_data(token):
-    """Get user data by token."""
-    users = load_json(USERS_FILE)
+    """Get user data by token from fody-specific storage."""
+    users = load_json_fody(FODY_USERS_FILE)
     if token not in users:
         # Create new user
         users[token] = {
@@ -263,17 +267,17 @@ def get_user_data(token):
                 "notifications_enabled": True
             }
         }
-        save_json(USERS_FILE, users)
+        save_json_fody(FODY_USERS_FILE, users)
     return users[token]
 
 
 def update_user_data(token, data):
-    """Update user data."""
-    users = load_json(USERS_FILE)
+    """Update user data in fody-specific storage."""
+    users = load_json_fody(FODY_USERS_FILE)
     if token in users:
         users[token].update(data)
         users[token]["last_active"] = datetime.now().isoformat()
-        save_json(USERS_FILE, users)
+        save_json_fody(FODY_USERS_FILE, users)
     return users.get(token, {})
 
 
@@ -303,12 +307,12 @@ def calculate_level_progress(points):
 @app.route('/api/gamification/info', methods=['GET'])
 def get_gamification_info():
     """Get gamification information - achievements, tasks, point values."""
-    ensure_file(ACHIEVEMENTS_FILE, DEFAULT_ACHIEVEMENTS)
-    ensure_file(TASKS_FILE, DEFAULT_TASKS)
+    ensure_file(FODY_ACHIEVEMENTS_FILE, DEFAULT_ACHIEVEMENTS)
+    ensure_file(FODY_TASKS_FILE, DEFAULT_TASKS)
     
     return jsonify({
-        "achievements": load_json(ACHIEVEMENTS_FILE),
-        "tasks": load_json(TASKS_FILE),
+        "achievements": load_json_fody(FODY_ACHIEVEMENTS_FILE),
+        "tasks": load_json_fody(FODY_TASKS_FILE),
         "point_values": POINT_VALUES,
         "level_formula": {
             "description": "Level = floor(sqrt(points / 100)) + 1",
@@ -342,7 +346,7 @@ def get_user_status(token):
     
     # Get unlocked achievements
     achievement_ids = user.get("achievements", [])
-    all_achievements = load_json(ACHIEVEMENTS_FILE)
+    all_achievements = load_json_fody(FODY_ACHIEVEMENTS_FILE)
     unlocked_achievements = [
         {**ach, "unlocked_at": user.get("achievement_unlocks", {}).get(ach_id, None)}
         for ach_id, ach in all_achievements.items()
@@ -351,7 +355,7 @@ def get_user_status(token):
     
     # Get completed tasks
     completed_task_ids = user.get("completed_tasks", [])
-    all_tasks = load_json(TASKS_FILE)
+    all_tasks = load_json_fody(FODY_TASKS_FILE)
     completed_tasks = [
         {**task, "completed_at": user.get("task_completions", {}).get(task_id, None)}
         for task_id, task in all_tasks.items()
@@ -459,7 +463,7 @@ def unlock_achievement():
         }), 200
     
     # Get achievement info
-    all_achievements = load_json(ACHIEVEMENTS_FILE)
+    all_achievements = load_json_fody(FODY_ACHIEVEMENTS_FILE)
     if achievement_id not in all_achievements:
         return jsonify({"error": "Achievement not found"}), 404
     
@@ -508,7 +512,7 @@ def complete_task():
         }), 200
     
     # Get task info
-    all_tasks = load_json(TASKS_FILE)
+    all_tasks = load_json_fody(FODY_TASKS_FILE)
     if task_id not in all_tasks:
         return jsonify({"error": "Task not found"}), 404
     
@@ -552,7 +556,7 @@ def full_sync():
     # Process achievements to unlock
     client_achievements = client_data.get("achievements", [])
     server_achievements = user.get("achievements", [])
-    all_achievements = load_json(ACHIEVEMENTS_FILE)
+    all_achievements = load_json_fody(FODY_ACHIEVEMENTS_FILE)
     
     # Unlock any new achievements
     new_achievements = []
@@ -567,7 +571,7 @@ def full_sync():
     # Process completed tasks
     client_tasks = client_data.get("completed_tasks", [])
     server_tasks = user.get("completed_tasks", [])
-    all_tasks = load_json(TASKS_FILE)
+    all_tasks = load_json_fody(FODY_TASKS_FILE)
     
     new_tasks = []
     for task_id in client_tasks:
@@ -608,7 +612,7 @@ def full_sync():
 @app.route('/api/gamification/leaderboard', methods=['GET'])
 def get_leaderboard():
     """Get points leaderboard."""
-    users = load_json(USERS_FILE)
+    users = load_json_fody(FODY_USERS_FILE)
     
     # Sort by points
     leaderboard = []
