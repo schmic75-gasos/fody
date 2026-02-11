@@ -1681,6 +1681,14 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
 
       setUploading(true);
 
+      // Record upload attempt start
+      recordUploadAttempt(false, {
+        photoType: selectedTag,
+        hasReference: !!reference,
+        hasNote: !!note,
+        uploadSource: 'fody_tab',
+      });
+
       try {
         const formData = new FormData();
         formData.append('uploadedfile', {
@@ -1711,6 +1719,18 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
         const result = await response.text();
         
         if (response.ok && result.startsWith('1')) {
+          // Record successful upload
+          recordUploadAttempt(true, {
+            photoType: selectedTag,
+            hasReference: !!reference,
+            hasNote: !!note,
+            uploadSource: 'fody_tab',
+            coordinates: {
+              lat: uploadLocation.latitude,
+              lon: uploadLocation.longitude,
+            },
+          });
+          
           Alert.alert('Úspěch', 'Fotka byla úspěšně nahrána!');
           setSelectedImage(null);
           setUploadLocation(null);
@@ -1721,9 +1741,23 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
           fetchPhotos();
           fetchStats();
         } else {
+          // Record failed upload
+          recordUploadAttempt(false, {
+            photoType: selectedTag,
+            hasReference: !!reference,
+            hasNote: !!note,
+            uploadSource: 'fody_tab',
+            error: result,
+          });
+          
+          // Record error
+          recordError('upload_failed', result);
+          
           Alert.alert('Chyba', `nahrávání selhalo: ${result}`);
         }
       } catch (error) {
+        // Record error
+        recordError('upload_exception', error.message);
         console.error('Chyba při nahrávání:', error);
         Alert.alert('Chyba', 'Nepodařilo se nahrát fotku. Zkontrolujte připojení a přihlášení.');
       } finally {
@@ -2868,6 +2902,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
 
     setUploading(true);
 
+    // Record upload attempt start
+    recordUploadAttempt(false, {
+      photoType: selectedTag,
+      hasReference: !!reference,
+      hasNote: !!note,
+      uploadSource: 'map_tab',
+      coordinates: {
+        lat: selectedLocation.latitude,
+        lon: selectedLocation.longitude,
+      },
+    });
+
     try {
       const formData = new FormData();
       formData.append('uploadedfile', {
@@ -2894,6 +2940,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
       const result = await response.text();
       
       if (response.ok && result.startsWith('1')) {
+        // Record successful upload
+        recordUploadAttempt(true, {
+          photoType: selectedTag,
+          hasReference: !!reference,
+          hasNote: !!note,
+          uploadSource: 'map_tab',
+          coordinates: {
+            lat: selectedLocation.latitude,
+            lon: selectedLocation.longitude,
+          },
+        });
+        
         Alert.alert('Uspech', 'Fotka byla úspěšně nahrána!');
         setShowUploadModal(false);
         setUploadImage(null);
@@ -2905,9 +2963,23 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         fetchPhotosForMap();
         if (onUploadComplete) onUploadComplete();
       } else {
+        // Record failed upload
+        recordUploadAttempt(false, {
+          photoType: selectedTag,
+          hasReference: !!reference,
+          hasNote: !!note,
+          uploadSource: 'map_tab',
+          error: result,
+        });
+        
+        // Record error
+        recordError('upload_failed_map', result);
+        
         Alert.alert('Chyba', `nahrávání selhalo: ${result}`);
       }
     } catch (error) {
+      // Record error
+      recordError('upload_exception_map', error.message);
       console.error('Chyba pri nahrávání:', error);
       Alert.alert('Chyba', 'Nepodařilo se nahrát fotku.');
     } finally {
@@ -3590,12 +3662,19 @@ export default function App() {
 
   const logout = async () => {
     try {
+      // Record logout event before actually logging out
+      recordEvent('osm_logout', {
+        hadUser: !!user,
+        sessionDuration: new Date() - sessionStartTime,
+      });
+      
       await fetch(`${AUTH_URL}?logout`, { credentials: 'include' });
       setUser(null);
       setIsLoggedIn(false);
       Alert.alert('Odhlášeno', 'Byli jste úspěšně odhlášeni.');
     } catch (error) {
       console.error('Chyba pri odhlaseni:', error);
+      recordError('logout_error', error.message);
     }
   };
 
@@ -3603,21 +3682,198 @@ export default function App() {
     setUser(username);
     setIsLoggedIn(true);
     setLoginModalVisible(false);
+    
+    // Record login event
+    recordEvent('osm_login_success', {
+      usernameHash: createUserHash(username),
+      method: 'oauth2',
+    });
+    
     Alert.alert('Přihlášeno', `Vítejte, ${username}!`);
   };
 
   const navigateToMapUpload = () => {
+    const previousTab = activeTab;
     setActiveTab('map');
+    recordNavigation(previousTab, 'map');
+    recordEvent('navigation', { from: previousTab, to: 'map', reason: 'upload_navigation' });
   };
 
   const handleSettingsChange = (newSettings) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
   };
 
-  // Function to send anonymous usage data
-const sendUsageData = async (data, telemetryEnabled = true) => {
+// ============================================
+// ENHANCED TELEMETRY SYSTEM FOR FLUFFINI.CZ
+// ============================================
+
+// Simple hash function for anonymizing IP and other identifiers
+const simpleHash = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(16).padStart(8, '0');
+};
+
+// Get device info
+const getDeviceInfo = () => {
+  return {
+    platform: Platform.OS,
+    platformVersion: Platform.Version,
+    isTablet: Platform.isPad || SCREEN_WIDTH > 600,
+    screenWidth: SCREEN_WIDTH,
+    screenHeight: SCREEN_HEIGHT,
+    screenScale: Platform.select({ ios: 2, android: undefined }), // Approximate
+    appVersion: '1.1.5',
+    appBuild: '115', // Could be extracted from app.json
+  };
+};
+
+// Get current timestamp in ISO format
+const getTimestamp = () => new Date().toISOString();
+
+// Session state for telemetry
+let sessionStartTime = new Date();
+let sessionEvents = [];
+let sessionPageViews = [];
+let sessionErrors = [];
+let sessionMapInteractions = [];
+let sessionPhotoViews = [];
+let sessionUploadAttempts = [];
+let sessionNavigationHistory = [];
+
+// Record a page view
+const recordPageView = (pageName, metadata = {}) => {
+  sessionPageViews.push({
+    timestamp: getTimestamp(),
+    page: pageName,
+    duration: 0, // Will be calculated when page closes
+    ...metadata,
+  });
+};
+
+// Record an event
+const recordEvent = (eventType, eventData = {}) => {
+  sessionEvents.push({
+    timestamp: getTimestamp(),
+    type: eventType,
+    ...eventData,
+  });
+};
+
+// Record map interaction
+const recordMapInteraction = (interactionType, data = {}) => {
+  sessionMapInteractions.push({
+    timestamp: getTimestamp(),
+    type: interactionType,
+    ...data,
+  });
+};
+
+// Record photo view
+const recordPhotoView = (photoId, metadata = {}) => {
+  sessionPhotoViews.push({
+    timestamp: getTimestamp(),
+    photoId: photoId,
+    ...metadata,
+  });
+};
+
+// Record error
+const recordError = (errorType, errorMessage, stackTrace = '') => {
+  sessionErrors.push({
+    timestamp: getTimestamp(),
+    type: errorType,
+    message: errorMessage,
+    stack: stackTrace,
+  });
+};
+
+// Record upload attempt
+const recordUploadAttempt = (success, metadata = {}) => {
+  sessionUploadAttempts.push({
+    timestamp: getTimestamp(),
+    success: success,
+    ...metadata,
+  });
+};
+
+// Generate enhanced session telemetry data
+const generateSessionTelemetry = (deviceId, userHash, hashedIp) => {
+  const sessionEndTime = new Date();
+  const sessionDurationMs = sessionEndTime - sessionStartTime;
+  
+  return {
+    // Core identifiers (all anonymized/hashed)
+    deviceId: simpleHash(deviceId),
+    userHash: userHash || null,
+    hashedIp: hashedIp || null,
+    
+    // Session info
+    timestamp: getTimestamp(),
+    sessionStart: sessionStartTime.toISOString(),
+    sessionEnd: sessionEndTime.toISOString(),
+    sessionDurationMs: sessionDurationMs,
+    
+    // Device info
+    device: getDeviceInfo(),
+    
+    // Network info placeholder (could be enhanced with NetInfo)
+    network: {
+      type: 'unknown', // Could use @react-native-community/netinfo
+      isConnected: true, // Placeholder
+    },
+    
+    // Permission status
+    permissions: {
+      location: 'unknown', // Could track actual permission status
+      camera: 'unknown',
+      storage: 'unknown',
+    },
+    
+    // Usage statistics
+    usage: {
+      totalPageViews: sessionPageViews.length,
+      totalEvents: sessionEvents.length,
+      totalMapInteractions: sessionMapInteractions.length,
+      totalPhotoViews: sessionPhotoViews.length,
+      totalUploadAttempts: sessionUploadAttempts.length,
+      totalErrors: sessionErrors.length,
+    },
+    
+    // Page views detail
+    pageViews: sessionPageViews.map(pv => ({
+      ...pv,
+      duration: pv.duration || 0,
+    })),
+    
+    // Events detail
+    events: sessionEvents,
+    
+    // Map interactions detail
+    mapInteractions: sessionMapInteractions,
+    
+    // Photo views detail
+    photoViews: sessionPhotoViews,
+    
+    // Upload attempts detail
+    uploadAttempts: sessionUploadAttempts,
+    
+    // Errors detail
+    errors: sessionErrors,
+    
+    // Navigation history
+    navigationHistory: sessionNavigationHistory,
+  };
+};
+
+// Send telemetry data to fluffini.cz API
+const sendTelemetryToFluffini = async (telemetryData, telemetryEnabled = true) => {
   if (!telemetryEnabled) {
-    return; // Don't send if telemetry is disabled
+    return;
   }
   
   try {
@@ -3625,58 +3881,129 @@ const sendUsageData = async (data, telemetryEnabled = true) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'User-Agent': `FodyApp/${telemetryData.device.appVersion}`,
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(telemetryData),
     });
 
     if (!response.ok) {
-      console.warn('Failed to upload usage data:', response.statusText);
+      console.warn('Failed to upload telemetry data to fluffini.cz:', response.statusText);
     }
   } catch (error) {
-    console.warn('Error uploading usage data:', error);
+    console.warn('Error uploading telemetry data to fluffini.cz:', error);
   }
 };
 
-// Example usage data collection
-const collectUsageData = () => {
-  if (!deviceId) return; // Počkej na device ID
-
-  const sessionDuration = new Date() - appStartTime;
-  const usageData = {
-    timestamp: new Date().toISOString(),
-    deviceId: deviceId,
-    screenWidth: SCREEN_WIDTH,
-    screenHeight: SCREEN_HEIGHT,
-    platform: Platform.OS,
-    version: '1.1.5',
-    sessionDurationMs: sessionDuration,
-    osmUser: isLoggedIn ? user : null,
-    activeTab: activeTab,
-    settings: {
-      objectLimitEnabled: settings.objectLimitEnabled,
-      photoLimit: settings.photoLimit,
+// Get public IP and hash it (async)
+let cachedHashedIp = null;
+const getHashedIp = async () => {
+  if (cachedHashedIp) {
+    return cachedHashedIp;
+  }
+  
+  try {
+    const response = await fetch('https://api.ipify.org?format=json', {
+      method: 'GET',
+      timeout: 5000,
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.ip) {
+        cachedHashedIp = simpleHash(data.ip);
+        return cachedHashedIp;
+      }
     }
-  };
-
-  sendUsageData(usageData, settings.telemetryEnabled);
+  } catch (error) {
+    // IP fetch failed, use a random hash based on device ID as fallback
+    console.warn('Could not fetch IP for telemetry:', error);
+  }
+  
+  // Fallback: hash device ID as pseudo-IP identifier
+  cachedHashedIp = simpleHash(deviceId || 'unknown');
+  return cachedHashedIp;
 };
 
-// Call collectUsageData periodically
-useEffect(() => {
-  // Initial call after device ID is loaded
-  if (deviceId) {
-    collectUsageData();
-  }
+// Flush telemetry data and reset session
+const flushTelemetry = async (deviceId, userHash, telemetryEnabled) => {
+  if (!deviceId) return;
+  
+  // Get hashed IP
+  const hashedIp = await getHashedIp();
+  
+  // Generate comprehensive telemetry data
+  const telemetryData = generateSessionTelemetry(deviceId, userHash, hashedIp);
+  
+  // Send to fluffini.cz
+  await sendTelemetryToFluffini(telemetryData, telemetryEnabled);
+  
+  // Reset session data (but keep start time for next session)
+  sessionEvents = [];
+  sessionPageViews = [];
+  sessionErrors = [];
+  sessionMapInteractions = [];
+  sessionPhotoViews = [];
+  sessionUploadAttempts = [];
+  sessionNavigationHistory = [];
+};
 
-  // Send data every 5 minutes
-  const interval = setInterval(() => {
-    if (deviceId) {
-      collectUsageData();
+// Record session navigation
+const recordNavigation = (fromScreen, toScreen) => {
+  sessionNavigationHistory.push({
+    timestamp: getTimestamp(),
+    from: fromScreen,
+    to: toScreen,
+  });
+};
+
+// Create user hash from OSM username
+const createUserHash = (username) => {
+  if (!username) return null;
+  return simpleHash(username.toLowerCase().trim());
+};
+
+// Update session start time when app comes to foreground
+const updateSessionStart = () => {
+  sessionStartTime = new Date();
+};
+
+// Call telemetry flush periodically and on app state changes
+useEffect(() => {
+  // Flush telemetry every 5 minutes
+  const telemetryInterval = setInterval(() => {
+    if (deviceId && settings.telemetryEnabled) {
+      const userHash = createUserHash(user);
+      flushTelemetry(deviceId, userHash, settings.telemetryEnabled);
+      updateSessionStart();
     }
   }, 5 * 60 * 1000);
 
-  return () => clearInterval(interval);
-}, [deviceId, isLoggedIn, user, activeTab, settings]);
+  // Record initial page view when app starts
+  if (deviceId && settings.telemetryEnabled) {
+    recordPageView('app_start', {
+      initialTab: activeTab,
+      hasOsmUser: !!user,
+    });
+    
+    recordNavigation('none', activeTab);
+    
+    recordEvent('app_started', {
+      version: '1.1.5',
+      platform: Platform.OS,
+      hasUser: !!user,
+    });
+  }
+
+  // Flush telemetry when app unmounts or settings change
+  return () => {
+    clearInterval(telemetryInterval);
+    // Flush remaining telemetry on unmount
+    if (deviceId && settings.telemetryEnabled) {
+      const userHash = createUserHash(user);
+      flushTelemetry(deviceId, userHash, settings.telemetryEnabled);
+    }
+  };
+}, [deviceId, user, settings.telemetryEnabled]);
 
   return (
     <AuthContext.Provider value={{ user, isLoggedIn, login, logout }}>
@@ -3726,7 +4053,13 @@ useEffect(() => {
         <View style={styles.tabBar}>
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'fody' && styles.tabItemActive]}
-            onPress={() => setActiveTab('fody')}
+            onPress={() => {
+              if (activeTab !== 'fody') {
+                recordNavigation(activeTab, 'fody');
+                recordEvent('navigation', { from: activeTab, to: 'fody', reason: 'tab_press' });
+              }
+              setActiveTab('fody');
+            }}
           >
             <Text style={[styles.tabIcon, activeTab === 'fody' && styles.tabIconActive]}>
               {Icons.camera}
@@ -3738,7 +4071,13 @@ useEffect(() => {
 
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'map' && styles.tabItemActive]}
-            onPress={() => setActiveTab('map')}
+            onPress={() => {
+              if (activeTab !== 'map') {
+                recordNavigation(activeTab, 'map');
+                recordEvent('navigation', { from: activeTab, to: 'map', reason: 'tab_press' });
+              }
+              setActiveTab('map');
+            }}
           >
             <Text style={[styles.tabIcon, activeTab === 'map' && styles.tabIconActive]}>
               {Icons.map}
@@ -3750,7 +4089,13 @@ useEffect(() => {
 
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'more' && styles.tabItemActive]}
-            onPress={() => setActiveTab('more')}
+            onPress={() => {
+              if (activeTab !== 'more') {
+                recordNavigation(activeTab, 'more');
+                recordEvent('navigation', { from: activeTab, to: 'more', reason: 'tab_press' });
+              }
+              setActiveTab('more');
+            }}
           >
             <Text style={[styles.tabIcon, activeTab === 'more' && styles.tabIconActive]}>
               {Icons.info}
