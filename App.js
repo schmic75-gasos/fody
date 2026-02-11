@@ -132,7 +132,218 @@ const Icons = {
   settings: '⚙️',
   download: '⬇️',
   fullscreen: '⛶',
+  trophy: '🏆',
+  star: '⭐',
+  medal: '🎖️',
+  gift: '🎁',
+  target: '🎯',
 };
+
+// ============================================
+// GAMIFICATION CONSTANTS
+// ============================================
+
+// Server URL for gamification API
+const GAMIFICATION_SERVER = 'https://fluffini.cz';
+
+// Point values for actions
+const POINT_VALUES = {
+  photoUpload: 10,
+  photoUploadWithNote: 15,
+  photoUploadWithReference: 12,
+  osmNoteCreate: 5,
+  firstLogin: 50,
+  firstUpload: 100,
+  firstNote: 30,
+  mapView: 2,
+  settingsView: 5,
+  statsView: 5,
+  exploreAllTabs: 75,
+};
+
+// Achievement definitions
+const ACHIEVEMENTS = {
+  first_login: {
+    id: 'first_login',
+    name: 'První kroky',
+    description: 'První spuštění aplikace',
+    icon: '👋',
+    points: 50,
+    category: 'milestone',
+  },
+  first_photo: {
+    id: 'first_photo',
+    name: 'Začínáme fotit',
+    description: 'První nahraná fotka',
+    icon: '📸',
+    points: 100,
+    category: 'upload',
+  },
+  explorer: {
+    id: 'explorer',
+    name: 'Objevitel',
+    description: 'Prozkoumal/a jsi všechny sekce aplikace',
+    icon: '🧭',
+    points: 75,
+    category: 'exploration',
+  },
+  map_navigation: {
+    id: 'map_navigation',
+    name: 'Kartograf',
+    description: 'Použil/a jsi mapu',
+    icon: '🗺️',
+    points: 25,
+    category: 'exploration',
+  },
+  note_creator: {
+    id: 'note_creator',
+    name: 'Tvůrce poznámek',
+    description: 'Vytvořil/a jsi OSM poznámku',
+    icon: '📝',
+    points: 30,
+    category: 'note',
+  },
+  photo_collector_10: {
+    id: 'photo_collector_10',
+    name: 'Sběratel',
+    description: 'Nahrál/a jsi 10 fotek',
+    icon: '📚',
+    points: 150,
+    category: 'upload',
+  },
+  photo_collector_50: {
+    id: 'photo_collector_50',
+    name: 'Expertní sběratel',
+    description: 'Nahrál/a jsi 50 fotek',
+    icon: '🏆',
+    points: 500,
+    category: 'upload',
+  },
+  night_owl: {
+    id: 'night_owl',
+    name: 'Noční sova',
+    description: 'Použil/a jsi aplikaci po 22:00',
+    icon: '🦉',
+    points: 20,
+    category: 'special',
+  },
+  early_bird: {
+    id: 'early_bird',
+    name: 'Ranní ptáče',
+    description: 'Použil/a jsi aplikaci před 6:00',
+    icon: '🐦',
+    points: 20,
+    category: 'special',
+  },
+  quality_contributor: {
+    id: 'quality_contributor',
+    name: 'Kvalitní příspěvek',
+    description: 'Přidal/a jsi poznámku k nahrané fotce',
+    icon: '⭐',
+    points: 35,
+    category: 'upload',
+  },
+  complete_profile: {
+    id: 'complete_profile',
+    name: 'Kompletní profil',
+    description: 'Přihlásil/a ses přes OSM',
+    icon: '✅',
+    points: 50,
+    category: 'milestone',
+  },
+  settings_guru: {
+    id: 'settings_guru',
+    name: 'Guru nastavení',
+    description: 'Otevřel/a jsi nastavení aplikace',
+    icon: '⚙️',
+    points: 15,
+    category: 'exploration',
+  },
+};
+
+// Task definitions for exploration
+const TASKS = {
+  task_first_upload: {
+    id: 'task_first_upload',
+    name: 'Nahrát první fotku',
+    description: 'Pokus se nahrát svou první fotku do databáze Fody',
+    points: 50,
+    icon: '📷',
+  },
+  task_explore_map: {
+    id: 'task_explore_map',
+    name: 'Prozkoumat mapu',
+    description: 'Otevři kartu Mapa a prohlédni si rozcestníky',
+    points: 25,
+    icon: '🗺️',
+  },
+  task_check_stats: {
+    id: 'task_check_stats',
+    name: 'Zkontrolovat statistiky',
+    description: 'Podívej se na statistiky v sekci Fody',
+    points: 15,
+    icon: '📊',
+  },
+  task_add_note: {
+    id: 'task_add_note',
+    name: 'Vytvořit poznámku',
+    description: 'Přidej OSM poznámku na mapě',
+    points: 30,
+    icon: '📝',
+  },
+  task_change_settings: {
+    id: 'task_change_settings',
+    name: 'Změnit nastavení',
+    description: 'Otevři nastavení a prohlédni si je',
+    points: 10,
+    icon: '⚙️',
+  },
+  task_view_project: {
+    id: 'task_view_project',
+    name: 'Projekt období',
+    description: 'Podívej se na aktuální projekt období',
+    points: 20,
+    icon: '📅',
+  },
+};
+
+// Calculate level from points
+const calculateLevel = (points) => {
+  if (points < 100) return 1;
+  return Math.floor(Math.sqrt(points / 100)) + 1;
+};
+
+// Calculate progress to next level (0-100)
+const calculateLevelProgress = (points) => {
+  const currentLevel = calculateLevel(points);
+  const pointsForCurrent = (currentLevel - 1) * 100;
+  const pointsForNext = currentLevel * 100;
+  if (points >= pointsForNext) return 100;
+  const progress = ((points - pointsForCurrent) / (pointsForNext - pointsForCurrent)) * 100;
+  return Math.min(100, Math.max(0, progress));
+};
+
+// ============================================
+// GAMIFICATION CONTEXT
+// ============================================
+
+const GamificationContext = React.createContext({
+  gamificationEnabled: true,
+  points: 0,
+  level: 1,
+  levelProgress: 0,
+  achievements: [],
+  completedTasks: [],
+  deviceToken: null,
+  isLoading: false,
+  checkTask: () => {},
+  awardPoints: () => {},
+  unlockAchievement: () => {},
+  syncWithServer: () => {},
+  showNotification: () => {},
+});
+
+const useGamification = () => React.useContext(GamificationContext);
 
 // ============================================
 // CUSTOM SLIDER COMPONENT
@@ -298,6 +509,583 @@ const Badge = ({ text, variant = 'default' }) => {
     </View>
   );
 };
+
+// ============================================
+// GAMIFICATION PROVIDER & MODAL
+// ============================================
+
+// Gamification Provider Component
+const GamificationProvider = ({ children }) => {
+  const [gamificationEnabled, setGamificationEnabled] = useState(true);
+  const [points, setPoints] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [levelProgress, setLevelProgress] = useState(0);
+  const [achievements, setAchievements] = useState([]);
+  const [completedTasks, setCompletedTasks] = useState([]);
+  const [deviceToken, setDeviceToken] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  // Initialize gamification
+  useEffect(() => {
+    const initializeGamification = async () => {
+      try {
+        // Get or create device token
+        let token = await AsyncStorage.getItem('deviceToken');
+        if (!token) {
+          token = `fody_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await AsyncStorage.setItem('deviceToken', token);
+        }
+        setDeviceToken(token);
+
+        // Load local gamification data
+        const localData = await AsyncStorage.getItem('gamificationData');
+        if (localData) {
+          const parsed = JSON.parse(localData);
+          setPoints(parsed.points || 0);
+          setAchievements(parsed.achievements || []);
+          setCompletedTasks(parsed.completedTasks || []);
+        }
+
+        // Load gamification enabled state
+        const gamEnabled = await AsyncStorage.getItem('gamificationEnabled');
+        if (gamEnabled !== null) {
+          setGamificationEnabled(JSON.parse(gamEnabled));
+        } else {
+          // Default to enabled
+          await AsyncStorage.setItem('gamificationEnabled', 'true');
+        }
+
+        // Sync with server
+        if (gamificationEnabled !== false) {
+          await syncWithServer(token);
+        }
+      } catch (error) {
+        console.error('Error initializing gamification:', error);
+      }
+    };
+
+    initializeGamification();
+  }, []);
+
+// Sync with server
+  const syncWithServer = async (token = deviceToken) => {
+    if (!token || !gamificationEnabled) return;
+
+    try {
+      setIsLoading(true);
+      
+      // Get local data
+      const localData = await AsyncStorage.getItem('gamificationData');
+      const local = localData ? JSON.parse(localData) : {};
+
+      // Fetch server data
+      const response = await fetch(`${GAMIFICATION_SERVER}/api/gamification/status/${token}`);
+      if (response.ok) {
+        const serverData = await response.json();
+        
+        // Merge data (server wins for persistent state)
+        const mergedPoints = Math.max(local.points || 0, serverData.points || 0);
+        const mergedAchievements = [...new Set([...(local.achievements || []), ...(serverData.achievements || [])])];
+        const mergedTasks = [...new Set([...(local.completedTasks || []), ...(serverData.completedTasks || [])])];
+        
+        setPoints(mergedPoints);
+        setLevel(serverData.level || calculateLevel(mergedPoints));
+        setLevelProgress(serverData.level_progress || calculateLevelProgress(mergedPoints));
+        setAchievements(mergedAchievements);
+        setCompletedTasks(mergedTasks);
+
+        // Save merged data locally
+        await AsyncStorage.setItem('gamificationData', JSON.stringify({
+          points: mergedPoints,
+          achievements: mergedAchievements,
+          completedTasks: mergedTasks,
+        }));
+      }
+    } catch (error) {
+      console.error('Error syncing with server:', error);
+      // Use local data as fallback
+      const localData = await AsyncStorage.getItem('gamificationData');
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        setPoints(parsed.points || 0);
+        setLevel(calculateLevel(parsed.points || 0));
+        setLevelProgress(calculateLevelProgress(parsed.points || 0));
+        setAchievements(parsed.achievements || []);
+        setCompletedTasks(parsed.completedTasks || []);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Award points
+  const awardPoints = async (amount, action, details = {}) => {
+    if (!gamificationEnabled) return;
+
+    const newPoints = points + amount;
+    setPoints(newPoints);
+    setLevel(calculateLevel(newPoints));
+    setLevelProgress(calculateLevelProgress(newPoints));
+
+    // Save locally
+    await AsyncStorage.setItem('gamificationData', JSON.stringify({
+      points: newPoints,
+      achievements,
+      completedTasks,
+    }));
+
+    // Show notification
+    showNotification(`+${amount} bodů`, 'success');
+
+    // Sync with server
+    try {
+      await fetch(`${GAMIFICATION_SERVER}/api/gamification/points`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: deviceToken,
+          points: amount,
+          action,
+          details,
+        }),
+      });
+    } catch (error) {
+      console.error('Error syncing points to server:', error);
+    }
+
+    // Check for level up
+    const newLevel = calculateLevel(newPoints);
+    if (newLevel > level) {
+      showNotification(`🎉 LEVEL UP! Nyní jsi na úrovni ${newLevel}!`, 'celebration');
+    }
+  };
+
+  // Unlock achievement
+  const unlockAchievement = async (achievementId) => {
+    if (!gamificationEnabled || achievements.includes(achievementId)) return;
+
+    const achievement = ACHIEVEMENTS[achievementId];
+    if (!achievement) return;
+
+    const newAchievements = [...achievements, achievementId];
+    setAchievements(newAchievements);
+
+    // Award achievement points
+    const newPoints = points + achievement.points;
+    setPoints(newPoints);
+    setLevel(calculateLevel(newPoints));
+    setLevelProgress(calculateLevelProgress(newPoints));
+
+    // Save locally
+    await AsyncStorage.setItem('gamificationData', JSON.stringify({
+      points: newPoints,
+      achievements: newAchievements,
+      completedTasks,
+    }));
+
+    // Show notification
+    showNotification(`🏆 ${achievement.icon} ${achievement.name} - +${achievement.points} bodů!`, 'celebration');
+
+    // Sync with server
+    try {
+      await fetch(`${GAMIFICATION_SERVER}/api/gamification/achievement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: deviceToken,
+          achievement_id: achievementId,
+        }),
+      });
+    } catch (error) {
+      console.error('Error syncing achievement to server:', error);
+    }
+  };
+
+  // Check and complete task
+  const checkTask = async (taskId) => {
+    if (!gamificationEnabled || completedTasks.includes(taskId)) return;
+
+    const task = TASKS[taskId];
+    if (!task) return;
+
+    const newCompletedTasks = [...completedTasks, taskId];
+    setCompletedTasks(newCompletedTasks);
+
+    // Award task points
+    const newPoints = points + task.points;
+    setPoints(newPoints);
+    setLevel(calculateLevel(newPoints));
+    setLevelProgress(calculateLevelProgress(newPoints));
+
+    // Save locally
+    await AsyncStorage.setItem('gamificationData', JSON.stringify({
+      points: newPoints,
+      achievements,
+      completedTasks: newCompletedTasks,
+    }));
+
+    // Show notification
+    showNotification(`✅ ${task.icon} ${task.name} - +${task.points} bodů!`, 'success');
+
+    // Sync with server
+    try {
+      await fetch(`${GAMIFICATION_SERVER}/api/gamification/task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: deviceToken,
+          task_id: taskId,
+        }),
+      });
+    } catch (error) {
+      console.error('Error syncing task to server:', error);
+    }
+  };
+
+  // Show notification
+  const showNotification = (message, type = 'success') => {
+    setNotification({ message, type, id: Date.now() });
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+      setNotification(null);
+    }, 3000);
+  };
+
+  // Update gamification enabled state
+  const updateGamificationEnabled = async (enabled) => {
+    setGamificationEnabled(enabled);
+    await AsyncStorage.setItem('gamificationEnabled', JSON.stringify(enabled));
+  };
+
+  return (
+    <GamificationContext.Provider value={{
+      gamificationEnabled,
+      points,
+      level,
+      levelProgress,
+      achievements,
+      completedTasks,
+      deviceToken,
+      isLoading,
+      checkTask,
+      awardPoints,
+      unlockAchievement,
+      syncWithServer,
+      showNotification,
+      updateGamificationEnabled,
+    }}>
+      {children}
+      {notification && (
+        <Animated.View 
+          style={[
+            styles.gamificationNotification,
+            notification.type === 'celebration' && styles.gamificationNotificationCelebration,
+          ]}
+          entering={FadeIn}
+          exiting={FadeOut}
+        >
+          <Text style={styles.gamificationNotificationText}>{notification.message}</Text>
+        </Animated.View>
+      )}
+    </GamificationContext.Provider>
+  );
+};
+
+// Points Display Component
+const PointsDisplay = ({ showLevel = true, compact = false }) => {
+  const { points, level, levelProgress, gamificationEnabled } = useGamification();
+
+  if (!gamificationEnabled) return null;
+
+  if (compact) {
+    return (
+      <View style={styles.pointsDisplayCompact}>
+        <Text style={styles.pointsDisplayIcon}>{Icons.trophy}</Text>
+        <Text style={styles.pointsDisplayValueCompact}>{points}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.pointsDisplay}>
+      <View style={styles.pointsDisplayHeader}>
+        <Text style={styles.pointsDisplayIcon}>{Icons.trophy}</Text>
+        <Text style={styles.pointsDisplayLabel}>Body</Text>
+      </View>
+      <Text style={styles.pointsDisplayValue}>{points}</Text>
+      {showLevel && (
+        <View style={styles.levelDisplay}>
+          <Text style={styles.levelText}>Level {level}</Text>
+          <View style={styles.levelProgressBar}>
+            <View style={[styles.levelProgressFill, { width: `${levelProgress}%` }]} />
+          </View>
+        </View>
+      )}
+    </View>
+  );
+};
+
+// Achievement Badge Component
+const AchievementBadge = ({ achievementId, size = 'normal', showDescription = false }) => {
+  const { achievements } = useGamification();
+  const achievement = ACHIEVEMENTS[achievementId];
+  const unlocked = achievements.includes(achievementId);
+
+  if (!achievement) return null;
+
+  const isLarge = size === 'large';
+  const opacity = unlocked ? 1 : 0.3;
+
+  return (
+    <View style={[styles.achievementBadge, isLarge && styles.achievementBadgeLarge]}>
+      <View style={[styles.achievementIcon, { opacity }]}>
+        <Text style={[styles.achievementIconText, isLarge && styles.achievementIconTextLarge]}>
+          {achievement.icon}
+        </Text>
+      </View>
+      <Text style={[styles.achievementName, isLarge && styles.achievementNameLarge]}>
+        {achievement.name}
+      </Text>
+      {showDescription && (
+        <Text style={styles.achievementDescription}>{achievement.description}</Text>
+      )}
+      <Text style={[styles.achievementPoints, isLarge && styles.achievementPointsLarge]}>
+        +{achievement.points} bodů
+      </Text>
+      {unlocked && (
+        <View style={styles.achievementUnlocked}>
+          <Text style={styles.achievementUnlockedText}>✓</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+// Task Item Component
+const TaskItem = ({ taskId, onComplete }) => {
+  const { completedTasks, checkTask, gamificationEnabled } = useGamification();
+  const task = TASKS[taskId];
+  const completed = completedTasks.includes(taskId);
+
+  if (!task || !gamificationEnabled) return null;
+
+  return (
+    <TouchableOpacity
+      style={[styles.taskItem, completed && styles.taskItemCompleted]}
+      onPress={() => {
+        if (!completed) {
+          checkTask(taskId);
+          onComplete && onComplete(task);
+        }
+      }}
+      disabled={completed}
+    >
+      <View style={styles.taskIcon}>{task.icon}</View>
+      <View style={styles.taskContent}>
+        <Text style={[styles.taskName, completed && styles.taskNameCompleted]}>
+          {task.name}
+        </Text>
+        <Text style={[styles.taskDescription, completed && styles.taskDescriptionCompleted]}>
+          {task.description}
+        </Text>
+      </View>
+      <View style={styles.taskPoints}>
+        <Text style={[styles.taskPointsText, completed && styles.taskPointsTextCompleted]}>
+          +{task.points}
+        </Text>
+        {completed && <Text style={styles.taskCheck}>✓</Text>}
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// Gamification Modal
+const GamificationModal = ({ visible, onClose }) => {
+  const { 
+    points, 
+    level, 
+    levelProgress, 
+    achievements, 
+    completedTasks,
+    gamificationEnabled,
+    unlockAchievement,
+  } = useGamification();
+
+  const [activeTab, setActiveTab] = useState('overview');
+
+  if (!gamificationEnabled) {
+    return (
+      <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>🎮 Gamifikace</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+              <Text style={styles.modalCloseText}>{Icons.close}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.gamificationDisabledContainer}>
+            <Text style={styles.gamificationDisabledIcon}>⚙️</Text>
+            <Text style={styles.gamificationDisabledTitle}>Gamifikace je vypnutá</Text>
+            <Text style={styles.gamificationDisabledText}>
+              Zapni gamifikaci v nastavení, abys mohl/a sbírat body a odemykat achievementy!
+            </Text>
+          </View>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  const unlockedAchievements = Object.values(ACHIEVEMENTS).filter(
+    ach => achievements.includes(ach.id)
+  );
+
+  const totalAchievements = Object.keys(ACHIEVEMENTS).length;
+  const totalTasks = Object.keys(TASKS).length;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>🎮 Gamifikace</Text>
+          <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>{Icons.close}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Level and Points Display */}
+        <View style={styles.gamificationHeader}>
+          <View style={styles.levelCard}>
+            <Text style={styles.levelNumber}>{level}</Text>
+            <Text style={styles.levelLabel}>Level</Text>
+          </View>
+          <View style={styles.pointsCard}>
+            <Text style={styles.pointsNumber}>{points}</Text>
+            <Text style={styles.pointsLabel}>Bodů</Text>
+          </View>
+          <View style={styles.progressCard}>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${levelProgress}%` }]} />
+            </View>
+            <Text style={styles.progressText}>{levelProgress.toFixed(0)}% do dalšího levelu</Text>
+          </View>
+        </View>
+
+        {/* Tabs */}
+        <View style={styles.gamificationTabs}>
+          <TouchableOpacity
+            style={[styles.gamificationTab, activeTab === 'overview' && styles.gamificationTabActive]}
+            onPress={() => setActiveTab('overview')}
+          >
+            <Text style={[styles.gamificationTabText, activeTab === 'overview' && styles.gamificationTabTextActive]}>
+              Přehled
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.gamificationTab, activeTab === 'achievements' && styles.gamificationTabActive]}
+            onPress={() => setActiveTab('achievements')}
+          >
+            <Text style={[styles.gamificationTabText, activeTab === 'achievements' && styles.gamificationTabTextActive]}>
+              Achievementy ({unlockedAchievements.length}/{totalAchievements})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.gamificationTab, activeTab === 'tasks' && styles.gamificationTabActive]}
+            onPress={() => setActiveTab('tasks')}
+          >
+            <Text style={[styles.gamificationTabText, activeTab === 'tasks' && styles.gamificationTabTextActive]}>
+              Úkoly ({completedTasks.length}/{totalTasks})
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Content */}
+        <ScrollView style={styles.gamificationContent}>
+          {activeTab === 'overview' && (
+            <View>
+              {/* Stats */}
+              <View style={styles.gamificationStats}>
+                <View style={styles.gamificationStat}>
+                  <Text style={styles.gamificationStatValue}>{points}</Text>
+                  <Text style={styles.gamificationStatLabel}>Celkem bodů</Text>
+                </View>
+                <View style={styles.gamificationStat}>
+                  <Text style={styles.gamificationStatValue}>{level}</Text>
+                  <Text style={styles.gamificationStatLabel}>Level</Text>
+                </View>
+                <View style={styles.gamificationStat}>
+                  <Text style={styles.gamificationStatValue}>{unlockedAchievements.length}</Text>
+                  <Text style={styles.gamificationStatLabel}>Achievementy</Text>
+                </View>
+                <View style={styles.gamificationStat}>
+                  <Text style={styles.gamificationStatValue}>{completedTasks.length}</Text>
+                  <Text style={styles.gamificationStatLabel}>Úkoly</Text>
+                </View>
+              </View>
+
+              {/* Recent Achievements */}
+              <Text style={styles.gamificationSectionTitle}>Poslední achievementy</Text>
+              {unlockedAchievements.length > 0 ? (
+                <View style={styles.achievementsGrid}>
+                  {unlockedAchievements.slice(-6).reverse().map((ach) => (
+                    <AchievementBadge key={ach.id} achievementId={ach.id} size="small" />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyText}>Zatím žádné achievementy. Začni plnit úkoly!</Text>
+              )}
+            </View>
+          )}
+
+          {activeTab === 'achievements' && (
+            <View>
+              <Text style={styles.gamificationSectionTitle}>Všechny achievementy</Text>
+              {Object.values(ACHIEVEMENTS).map((ach) => (
+                <AchievementBadge 
+                  key={ach.id} 
+                  achievementId={ach.id} 
+                  showDescription 
+                />
+              ))}
+            </View>
+          )}
+
+          {activeTab === 'tasks' && (
+            <View>
+              <Text style={styles.gamificationSectionTitle}>Dostupné úkoly</Text>
+              {Object.values(TASKS).map((task) => (
+                <TaskItem key={task.id} taskId={task.id} />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// Gamification Toggle Component for Settings
+const GamificationToggle = () => {
+  const { gamificationEnabled, updateGamificationEnabled } = useGamification();
+
+  return (
+    <View style={styles.settingsToggleContainer}>
+      <View style={styles.settingsToggleLabel}>
+        <Text style={styles.settingsLabel}>Gamifikace</Text>
+        <Text style={styles.settingsToggleHint}>Sbírej body a odemykej achievementy</Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.settingsToggle, gamificationEnabled && styles.settingsToggleActive]}
+        onPress={() => updateGamificationEnabled(!gamificationEnabled)}
+      >
+        <View style={[styles.settingsToggleButton, gamificationEnabled && styles.settingsToggleButtonActive]} />
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// Animated components for notifications
+import { FadeIn, FadeOut } from 'react-native-reanimated';
 
 // Statistika komponenta
 const StatCard = ({ title, value, icon, color }) => (
@@ -1106,6 +1894,9 @@ const SettingsModal = ({ visible, onClose, settings, onSettingsChange }) => {
                 <View style={[styles.settingsToggleButton, telemetryEnabled && styles.settingsToggleButtonActive]} />
               </TouchableOpacity>
             </View>
+
+            {/* Gamifikace Toggle */}
+            <GamificationToggle />
 
             {/* Zoom Limit Settings */}
             <View style={{ borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 16, paddingTop: 16 }}>
@@ -3259,6 +4050,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
   const [panoramaxId, setPanoramaxId] = useState('');
   const [panoramaxViewerVisible, setPanoramaxViewerVisible] = useState(false);
   const [selectedPanoramax, setSelectedPanoramax] = useState({ id: null, sequence: null });
+  const [gamificationModalVisible, setGamificationModalVisible] = useState(false);
 
   useEffect(() => {
     fetchProjectMonth();
@@ -3375,6 +4167,19 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.linkSubtitle}>Limit fotek, mapový podklad</Text>
         </View>
         <Text style={styles.linkArrow}>{Icons.forward}</Text>
+      </Card>
+
+      {/* Gamifikace */}
+      <Card style={styles.linkCard} onPress={() => setGamificationModalVisible(true)}>
+        <Text style={styles.linkIcon}>🎮</Text>
+        <View style={styles.linkContent}>
+          <Text style={styles.linkTitle}>Gamifikace</Text>
+          <Text style={styles.linkSubtitle}>Body, achievementy, úkoly</Text>
+        </View>
+        <View style={styles.linkArrowContainer}>
+          <PointsDisplay compact />
+          <Text style={styles.linkArrow}>{Icons.forward}</Text>
+        </View>
       </Card>
 
       {/* Panoramax manual viewer */}
@@ -3604,6 +4409,12 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           setPanoramaxViewerVisible(false);
           setSelectedPanoramax({ id: null, sequence: null });
         }}
+      />
+
+      {/* Gamification Modal */}
+      <GamificationModal
+        visible={gamificationModalVisible}
+        onClose={() => setGamificationModalVisible(false)}
       />
     </ScrollView>
   );
@@ -4006,8 +4817,9 @@ useEffect(() => {
 }, [deviceId, user, settings.telemetryEnabled]);
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn, login, logout }}>
-      <SafeAreaView style={styles.container}>
+    <GamificationProvider>
+      <AuthContext.Provider value={{ user, isLoggedIn, login, logout }}>
+        <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor={COLORS.surface} />
         
         {/* Header */}
@@ -4120,7 +4932,8 @@ useEffect(() => {
           onClose={() => setUserProfileVisible(false)}
         />
       </SafeAreaView>
-    </AuthContext.Provider>
+      </AuthContext.Provider>
+    </GamificationProvider>
   );
 }
 
@@ -5594,6 +6407,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: COLORS.textSecondary,
   },
+  linkArrowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   aboutCard: {
     marginBottom: 12,
   },
@@ -5760,5 +6577,447 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     lineHeight: 18,
     textAlign: 'center',
+  },
+
+  // ============================================
+  // GAMIFICATION STYLES
+  // ============================================
+
+  // Gamification Notification
+  gamificationNotification: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    right: 16,
+    backgroundColor: COLORS.success,
+    padding: 16,
+    borderRadius: 12,
+    zIndex: 1000,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
+  },
+  gamificationNotificationCelebration: {
+    backgroundColor: COLORS.accent,
+  },
+  gamificationNotificationText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // Gamification Modal
+  gamificationDisabledContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  gamificationDisabledIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  gamificationDisabledTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  gamificationDisabledText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+
+  // Gamification Header
+  gamificationHeader: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: COLORS.primary + '15',
+  },
+  levelCard: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    marginHorizontal: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  levelNumber: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  levelLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  pointsCard: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    marginHorizontal: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  pointsNumber: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: COLORS.accent,
+  },
+  pointsLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  progressCard: {
+    flex: 2,
+    padding: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    marginHorizontal: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: COLORS.border,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+
+  // Gamification Tabs
+  gamificationTabs: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  gamificationTab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  gamificationTabActive: {
+    borderBottomWidth: 2,
+    borderBottomColor: COLORS.primary,
+  },
+  gamificationTabText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  gamificationTabTextActive: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+
+  // Gamification Content
+  gamificationContent: {
+    flex: 1,
+    padding: 16,
+  },
+  gamificationSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  gamificationStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -8,
+    marginBottom: 16,
+  },
+  gamificationStat: {
+    width: (SCREEN_WIDTH - 64) / 2,
+    marginHorizontal: 8,
+    marginBottom: 16,
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+  },
+  gamificationStatValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  gamificationStatLabel: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+  },
+
+  // Achievements Grid
+  achievementsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+  },
+
+  // Achievement Badge
+  achievementBadge: {
+    width: (SCREEN_WIDTH - 48) / 3,
+    padding: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+    marginBottom: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  achievementBadgeLarge: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  achievementIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.primaryLight + '30',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  achievementIconText: {
+    fontSize: 24,
+  },
+  achievementIconTextLarge: {
+    fontSize: 32,
+    marginBottom: 0,
+    marginRight: 16,
+  },
+  achievementName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  achievementNameLarge: {
+    fontSize: 16,
+    textAlign: 'left',
+    flex: 1,
+  },
+  achievementDescription: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  achievementPoints: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.accent,
+    marginTop: 4,
+  },
+  achievementPointsLarge: {
+    fontSize: 14,
+    marginTop: 0,
+    marginLeft: 8,
+  },
+  achievementUnlocked: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  achievementUnlockedText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  // Task Item
+  taskItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    marginBottom: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
+  },
+  taskItemCompleted: {
+    backgroundColor: COLORS.success + '15',
+  },
+  taskIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  taskContent: {
+    flex: 1,
+  },
+  taskName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  taskNameCompleted: {
+    color: COLORS.success,
+  },
+  taskDescription: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  taskDescriptionCompleted: {
+    color: COLORS.textSecondary,
+  },
+  taskPoints: {
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  taskPointsText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.accent,
+  },
+  taskPointsTextCompleted: {
+    color: COLORS.success,
+  },
+  taskCheck: {
+    fontSize: 12,
+    color: COLORS.success,
+    marginTop: 2,
+  },
+
+  // Points Display
+  pointsDisplay: {
+    backgroundColor: COLORS.primaryLight + '20',
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  pointsDisplayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  pointsDisplayIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  pointsDisplayLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  pointsDisplayValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  pointsDisplayCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primaryLight + '20',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  pointsDisplayValueCompact: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginLeft: 4,
+  },
+  levelDisplay: {
+    width: '100%',
+    marginTop: 8,
+  },
+  levelText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  levelProgressBar: {
+    height: 4,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  levelProgressFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: 2,
   },
 });
