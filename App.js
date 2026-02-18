@@ -391,6 +391,22 @@ const CustomSlider = ({ value, onValueChange, minimumValue = 10, maximumValue = 
 };
 
 // ============================================
+// OSM OAUTH2 KONFIGURACE
+// ============================================
+
+// OSM OAuth credentials
+const OSM_OAUTH_CLIENT_ID = 'YPdKTNwBKOyNLXKWSsq796K3sdbcBJTje3jVoIPZwtE';
+const OSM_OAUTH_CLIENT_SECRET = 'IGeiAhBe7NHbbkTrWtFGcCSpuuyJHiPyXdFTLMM-ARA';
+const OSM_OAUTH_REDIRECT_URI = 'fodyapp://oauth/callback';
+const OSM_OAUTH_SCOPES = 'read_prefs write_api write_notes';
+
+// OAuth URLs
+const OSM_OAUTH_BASE = 'https://www.openstreetmap.org';
+const OSM_OAUTH_AUTHORIZE_URL = `${OSM_OAUTH_BASE}/oauth/authorize`;
+const OSM_OAUTH_TOKEN_URL = `${OSM_OAUTH_BASE}/oauth/token`;
+const OSM_API_BASE_URL = 'https://api.openstreetmap.org/api/0.6';
+
+// ============================================
 // AUTORIZACE - OAuth2 pres OSM
 // ============================================
 
@@ -400,9 +416,27 @@ const AuthContext = React.createContext({
   login: () => {},
   logout: () => {},
   osmAccessToken: null,
+  isOsmLoggedIn: false,
+  osmUser: null,
+  loginWithOsm: () => {},
+  logoutOsm: () => {},
 });
 
 const useAuth = () => React.useContext(AuthContext);
+
+// Helper function to parse OAuth callback URL
+const parseOAuthCallback = (url) => {
+  try {
+    const urlObj = new URL(url);
+    const code = urlObj.searchParams.get('code');
+    const state = urlObj.searchParams.get('state');
+    const error = urlObj.searchParams.get('error');
+    return { code, state, error };
+  } catch (e) {
+    console.error('Error parsing OAuth callback:', e);
+    return { code: null, state: null, error: null };
+  }
+};
 
 // ============================================
 // HELPER FUNCTIONS
@@ -1144,11 +1178,15 @@ const PhotoGridItem = ({ photo, onPress, onAuthorPress }) => (
   </TouchableOpacity>
 );
 
-// OSM Tags Table komponenta
-const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
+// OSM Tags Table komponenta s možností editace
+const OSMTagsTable = ({ lat, lon, visible, onClose, isOsmLoggedIn, osmAccessToken, onTagsUpdated }) => {
   const [tags, setTags] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [selectedElement, setSelectedElement] = useState(null);
 
   const fetchOSMTags = async () => {
     setLoading(true);
@@ -1167,6 +1205,7 @@ const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
         // Najdi nejblizsi prvek s tagy
         const elementWithTags = data.elements.find(el => el.tags && Object.keys(el.tags).length > 0);
         if (elementWithTags) {
+          setSelectedElement(elementWithTags);
           setTags(elementWithTags.tags);
         } else {
           setTags({});
@@ -1182,6 +1221,185 @@ const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
     }
   };
 
+  const startEditing = (key, value) => {
+    setEditingKey(key);
+    setEditValue(value);
+  };
+
+  const cancelEditing = () => {
+    setEditingKey(null);
+    setEditValue('');
+  };
+
+  const saveTag = async (key) => {
+    if (!osmAccessToken || !selectedElement) {
+      Alert.alert('Chyba', 'Pro úpravu tagů je potřeba OSM autorizace');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const elementType = selectedElement.type; // node, way, relation
+      const elementId = selectedElement.id;
+      
+      // Create changeset
+      const changesetResponse = await fetch(`${OSM_API_BASE_URL}/changeset/create`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${osmAccessToken}`,
+          'Content-Type': 'text/plain',
+        },
+        body: `<osm>< changeset version="1" >< tag k="created_by" v="FodyApp 1.1.5" />< tag k="comment" v="Updated via FodyApp" /></ changeset ></osm>`,
+      });
+
+      if (!changesetResponse.ok) {
+        throw new Error('Nepodařilo se vytvořit changeset');
+      }
+
+      const changesetId = await changesetResponse.text();
+
+      // Prepare the payload for updating the tag
+      const payload = {
+        osm: {
+          [`${elementType}`]: {
+            id: elementId,
+            version: selectedElement.version,
+            changeset: changesetId,
+            tag: [
+              { k: key, v: editValue },
+            ],
+          },
+        },
+      };
+
+      // Update the tag
+      const updateResponse = await fetch(`${OSM_API_URL}/${elementType}/${elementId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${osmAccessToken}`,
+          'Content-Type': 'application/xml',
+        },
+        body: `<osmChange version="0.6" generator="FodyApp">
+          <modify>
+            <${elementType} id="${elementId}" version="${selectedElement.version}" changeset="${changesetId}">
+              <tag k="${key}" v="${editValue}" />
+            </${elementType}>
+          </modify>
+        </osmChange>`,
+      });
+
+      if (updateResponse.ok) {
+        // Close changeset
+        await fetch(`${OSM_API_BASE_URL}/changeset/${changesetId}/close`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${osmAccessToken}`,
+          },
+        });
+
+        Alert.alert('Úspěch', 'Tag byl aktualizován');
+        setTags(prev => ({ ...prev, [key]: editValue }));
+        onTagsUpdated && onTagsUpdated(key, editValue);
+        cancelEditing();
+      } else {
+        const errorText = await updateResponse.text();
+        throw new Error(`Nepodařilo se aktualizovat tag: ${errorText}`);
+      }
+    } catch (err) {
+      console.error('Error saving tag:', err);
+      Alert.alert('Chyba', err.message || 'Nepodařilo se uložit tag');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteTag = async (key) => {
+    if (!osmAccessToken || !selectedElement) {
+      Alert.alert('Chyba', 'Pro smazání tagů je potřeba OSM autorizace');
+      return;
+    }
+
+    Alert.alert(
+      'Smazat tag',
+      `Opravdu chcete smazat tag "${key}"?`,
+      [
+        { text: 'Zrušit', style: 'cancel' },
+        {
+          text: 'Smazat',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const elementType = selectedElement.type;
+              const elementId = selectedElement.id;
+
+              // Create changeset
+              const changesetResponse = await fetch(`${OSM_API_BASE_URL}/changeset/create`, {
+                method: 'PUT',
+                headers: {
+                  'Authorization': `Bearer ${osmAccessToken}`,
+                  'Content-Type': 'text/plain',
+                },
+                body: `<osm>< changeset version="1" >< tag k="created_by" v="FodyApp 1.1.5" />< tag k="comment" v="Deleted tag via FodyApp" /></ changeset ></osm>`,
+              });
+
+              if (!changesetResponse.ok) {
+                throw new Error('Nepodařilo se vytvořit changeset');
+              }
+
+              const changesetId = await changesetResponse.text();
+
+              // Delete the tag by setting it to empty
+              const updateResponse = await fetch(`${OSM_API_BASE_URL}/${elementType}/${elementId}`, {
+                method: 'PUT',
+                headers: {
+                  'Authorization': `Bearer ${osmAccessToken}`,
+                  'Content-Type': 'application/xml',
+                },
+                body: `<osmChange version="0.6" generator="FodyApp">
+                  <modify>
+                    <${elementType} id="${elementId}" version="${selectedElement.version}" changeset="${changesetId}">
+                    </${elementType}>
+                  </modify>
+                </osmChange>`,
+              });
+
+              if (updateResponse.ok) {
+                await fetch(`${OSM_API_BASE_URL}/changeset/${changesetId}/close`, {
+                  method: 'PUT',
+                  headers: {
+                    'Authorization': `Bearer ${osmAccessToken}`,
+                  },
+                });
+
+                Alert.alert('Úspěch', 'Tag byl smazán');
+                const newTags = { ...tags };
+                delete newTags[key];
+                setTags(newTags);
+                onTagsUpdated && onTagsUpdated(key, null);
+              } else {
+                throw new Error('Nepodařilo se smazat tag');
+              }
+            } catch (err) {
+              console.error('Error deleting tag:', err);
+              Alert.alert('Chyba', 'Nepodařilo se smazat tag');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const addNewTag = () => {
+    const newKey = editingKey;
+    const newValue = editValue;
+    if (newKey && newValue) {
+      saveTag(newKey);
+    }
+  };
+
   if (!visible) return null;
 
   return (
@@ -1192,6 +1410,20 @@ const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
           <Text style={styles.tagsTableClose}>{Icons.close}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Element Info */}
+      {selectedElement && (
+        <View style={styles.tagsElementInfo}>
+          <Text style={styles.tagsElementType}>
+            {selectedElement.type} #{selectedElement.id}
+          </Text>
+          {isOsmLoggedIn && osmAccessToken ? (
+            <Badge text="Můžete upravovat" variant="success" />
+          ) : (
+            <Badge text="Pro úpravu se přihlaste" variant="info" />
+          )}
+        </View>
+      )}
       
       {!tags && !loading && !error && (
         <Button
@@ -1222,18 +1454,163 @@ const OSMTagsTable = ({ lat, lon, visible, onClose }) => {
         <ScrollView style={styles.tagsTableScroll}>
           {Object.entries(tags).map(([key, value]) => (
             <View key={key} style={styles.tagsTableRow}>
-              <Text style={styles.tagsTableKey}>{key}</Text>
-              <Text style={styles.tagsTableValue}>{value}</Text>
+              {editingKey === key ? (
+                <View style={styles.tagsTableEditRow}>
+                  <Text style={styles.tagsTableKey}>{key}</Text>
+                  <TextInput
+                    style={styles.tagsTableEditInput}
+                    value={editValue}
+                    onChangeText={setEditValue}
+                    autoFocus
+                  />
+                  <View style={styles.tagsTableEditButtons}>
+                    <TouchableOpacity 
+                      onPress={() => saveTag(key)}
+                      style={styles.tagsTableEditBtn}
+                    >
+                      <Text style={styles.tagsTableEditBtnText}>{Icons.check}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={cancelEditing}
+                      style={styles.tagsTableEditBtn}
+                    >
+                      <Text style={styles.tagsTableEditBtnText}>{Icons.close}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.tagsTableKey}>{key}</Text>
+                  <Text style={styles.tagsTableValue} numberOfLines={2}>{value}</Text>
+                  {isOsmLoggedIn && osmAccessToken && (
+                    <View style={styles.tagsTableActions}>
+                      <TouchableOpacity 
+                        onPress={() => startEditing(key, value)}
+                        style={styles.tagsTableActionBtn}
+                      >
+                        <Text style={styles.tagsTableActionText}>✏️</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        onPress={() => deleteTag(key)}
+                        style={styles.tagsTableActionBtn}
+                      >
+                        <Text style={styles.tagsTableActionText}>🗑️</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
+              )}
             </View>
           ))}
+
+          {/* Add new tag option */}
+          {isOsmLoggedIn && osmAccessToken && (
+            <View style={styles.tagsTableAddRow}>
+              {editingKey === '__new__' ? (
+                <View style={styles.tagsTableEditRow}>
+                  <TextInput
+                    style={[styles.tagsTableEditInput, { flex: 1, marginRight: 8 }]}
+                    value={editValue}
+                    onChangeText={setEditValue}
+                    placeholder="Nový klíč=hodnota"
+                    autoFocus
+                  />
+                  <View style={styles.tagsTableEditButtons}>
+                    <TouchableOpacity 
+                      onPress={addNewTag}
+                      style={styles.tagsTableEditBtn}
+                    >
+                      <Text style={styles.tagsTableEditBtnText}>{Icons.check}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={cancelEditing}
+                      style={styles.tagsTableEditBtn}
+                    >
+                      <Text style={styles.tagsTableEditBtnText}>{Icons.close}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.tagsTableAddBtn}
+                  onPress={() => {
+                    setEditingKey('__new__');
+                    setEditValue('');
+                  }}
+                >
+                  <Text style={styles.tagsTableAddBtnText}>+ Přidat nový tag</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </ScrollView>
+      )}
+
+      {saving && (
+        <View style={styles.tagsTableLoading}>
+          <ActivityIndicator color={COLORS.primary} />
+          <Text style={styles.tagsTableLoadingText}>Ukládám...</Text>
+        </View>
       )}
     </View>
   );
 };
 
-// Fullscreen Photo Modal
+// Fullscreen Photo Modal with Zoom
 const FullscreenPhotoModal = ({ visible, photoId, onClose }) => {
+  const [scale, setScale] = useState(1);
+  const [translateX, setTranslateX] = useState(0);
+  const [translateY, setTranslateY] = useState(0);
+  const [isZoomed, setIsZoomed] = useState(false);
+  const lastScale = useRef(1);
+  const lastTranslateX = useRef(0);
+  const lastTranslateY = useRef(0);
+
+  const resetZoom = () => {
+    setScale(1);
+    setTranslateX(0);
+    setTranslateY(0);
+    setIsZoomed(false);
+    lastScale.current = 1;
+    lastTranslateX.current = 0;
+    lastTranslateY.current = 0;
+  };
+
+  const handlePinchGesture = (event) => {
+    const newScale = lastScale.current * event.nativeEvent.scale;
+    if (newScale >= 1 && newScale <= 4) {
+      setScale(newScale);
+      setIsZoomed(newScale > 1);
+    }
+  };
+
+  const handlePinchGestureEnd = () => {
+    lastScale.current = scale;
+    if (scale < 1) {
+      resetZoom();
+    }
+  };
+
+  const handlePanGesture = (event) => {
+    if (scale > 1) {
+      const newTranslateX = lastTranslateX.current + event.nativeEvent.translationX;
+      const newTranslateY = lastTranslateY.current + event.nativeEvent.translationY;
+      setTranslateX(newTranslateX);
+      setTranslateY(newTranslateY);
+    }
+  };
+
+  const handlePanGestureEnd = () => {
+    lastTranslateX.current = translateX;
+    lastTranslateY.current = translateY;
+  };
+
+  useEffect(() => {
+    if (!visible) {
+      resetZoom();
+    }
+  }, [visible]);
+
   if (!photoId) return null;
 
   return (
@@ -1244,23 +1621,60 @@ const FullscreenPhotoModal = ({ visible, photoId, onClose }) => {
             <Text style={styles.fullscreenPhotoCloseText}>{Icons.close}</Text>
           </TouchableOpacity>
           <Text style={styles.fullscreenPhotoTitle}>Fotka #{photoId}</Text>
-          <View style={{ width: 40 }} />
+          <View style={{ width: 40 }}>
+            {isZoomed && (
+              <TouchableOpacity onPress={resetZoom} style={styles.resetZoomBtn}>
+                <Text style={styles.resetZoomText}>Reset</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        <View style={styles.fullscreenPhotoContent}>
-          <Image
-            source={{ uri: `${FODY_API_BASE}/files/${photoId}.jpg` }}
-            style={styles.fullscreenPhotoImage}
-            resizeMode="contain"
-          />
+        <View 
+          style={styles.fullscreenPhotoContent}
+          onStartShouldSetResponder={() => true}
+          onResponderGrant={handlePinchGesture}
+          onResponderMove={handlePinchGesture}
+          onResponderRelease={handlePinchGestureEnd}
+          onResponderTerminate={handlePinchGestureEnd}
+        >
+          <Animated.View 
+            style={[
+              styles.fullscreenPhotoImageContainer,
+              {
+                transform: [
+                  { scale: scale },
+                  { translateX: translateX / scale },
+                  { translateY: translateY / scale },
+                ],
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: `${FODY_API_BASE}/files/${photoId}.jpg` }}
+              style={styles.fullscreenPhotoImage}
+              resizeMode="contain"
+            />
+          </Animated.View>
         </View>
+        
+        {scale > 1 && (
+          <View style={styles.zoomIndicator}>
+            <Text style={styles.zoomIndicatorText}>{Math.round(scale * 100)}%</Text>
+          </View>
+        )}
+        
+        <Text style={styles.zoomHint}>Pinch to zoom • Drag to pan</Text>
       </SafeAreaView>
     </Modal>
   );
 };
 
 // Photo Detail Modal with expanded features
-const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
+const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress, isOsmLoggedIn: propOsmLoggedIn, osmAccessToken: propOsmToken }) => {
+  const { isOsmLoggedIn: contextOsmLoggedIn, osmAccessToken: contextOsmToken } = useAuth();
+  const isOsmLoggedIn = propOsmLoggedIn ?? contextOsmLoggedIn;
+  const osmAccessToken = propOsmToken ?? contextOsmToken;
   const [showTags, setShowTags] = useState(false);
   const [fullscreenVisible, setFullscreenVisible] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -1399,6 +1813,8 @@ const PhotoDetailModal = ({ visible, photo, onClose, onAuthorPress }) => {
                   lon={coords[0]} 
                   visible={showTags}
                   onClose={() => setShowTags(false)}
+                  isOsmLoggedIn={isOsmLoggedIn}
+                  osmAccessToken={osmAccessToken}
                 />
               </View>
             )}
@@ -1703,7 +2119,393 @@ const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
   );
 };
 
-// OSM Note Add Modal
+// OSM Note Modal with Comment and Close functionality
+const OSMNoteModal = ({ visible, note, location, onClose, onRefresh, isOsmLoggedIn, osmAccessToken }) => {
+  const [noteText, setNoteText] = useState('');
+  const [commentText, setCommentText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState('view'); // 'view', 'comment', 'close'
+  const { awardPoints, unlockAchievement, checkTask, gamificationEnabled } = useGamification();
+
+  // Fetch note details if we have a note ID
+  const [noteDetails, setNoteDetails] = useState(null);
+  const [loadingNote, setLoadingNote] = useState(false);
+
+  useEffect(() => {
+    if (visible && note?.id) {
+      fetchNoteDetails(note.id);
+    }
+  }, [visible, note?.id]);
+
+  const fetchNoteDetails = async (noteId) => {
+    setLoadingNote(true);
+    try {
+      const response = await fetch(`${OSM_NOTES_API}/${noteId}.json`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.features && data.features.length > 0) {
+          setNoteDetails(data.features[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching note details:', error);
+    } finally {
+      setLoadingNote(false);
+    }
+  };
+
+  const createNote = async () => {
+    if (!noteText.trim()) {
+      Alert.alert('Chyba', 'Napište text poznámky');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const noteWithAppInfo = `${noteText}\n\nvia FodyApp version 1.1.5 - beta`;
+      const url = `${OSM_NOTES_API}?lat=${location.latitude}&lon=${location.longitude}&text=${encodeURIComponent(noteWithAppInfo)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        if (gamificationEnabled) {
+          awardPoints(POINT_VALUES.osmNoteCreate, 'osm_note_create');
+          unlockAchievement('note_creator');
+          checkTask('task_add_note');
+        }
+        Alert.alert('Úspěch', 'Poznámka byla vytvořena');
+        setNoteText('');
+        onRefresh && onRefresh();
+        onClose();
+      } else {
+        const errorText = await response.text();
+        Alert.alert('Chyba', `Nepodařilo se vytvořit poznámku: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Error creating note:', error);
+      Alert.alert('Chyba', 'Nepodařilo se vytvořit poznámku');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addComment = async () => {
+    if (!commentText.trim() || !osmAccessToken) {
+      Alert.alert('Chyba', 'Pro komentování je potřeba OSM autorizace');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const commentWithAppInfo = `${commentText}\n\nvia FodyApp version 1.1.5 - beta`;
+      const url = `${OSM_NOTES_API}/${note.id}/comment.json`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Bearer ${osmAccessToken}`,
+        },
+        body: `text=${encodeURIComponent(commentWithAppInfo)}`,
+      });
+
+      if (response.ok) {
+        Alert.alert('Úspěch', 'Komentář byl přidán');
+        setCommentText('');
+        fetchNoteDetails(note.id);
+        onRefresh && onRefresh();
+      } else {
+        const errorText = await response.text();
+        Alert.alert('Chyba', `Nepodařilo se přidat komentář: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      Alert.alert('Chyba', 'Nepodařilo se přidat komentář');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const closeNote = async () => {
+    if (!osmAccessToken) {
+      Alert.alert('Chyba', 'Pro uzavření poznámky je potřeba OSM autorizace');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const closeText = `Poznámka vyřešena prostřednictvím FodyApp\n\nvia FodyApp version 1.1.5 - beta`;
+      const url = `${OSM_NOTES_API}/${note.id}/close.json`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Bearer ${osmAccessToken}`,
+        },
+        body: `text=${encodeURIComponent(closeText)}`,
+      });
+
+      if (response.ok) {
+        Alert.alert('Úspěch', 'Poznámka byla uzavřena');
+        fetchNoteDetails(note.id);
+        onRefresh && onRefresh();
+      } else {
+        const errorText = await response.text();
+        Alert.alert('Chyba', `Nepodařilo se uzavřít poznámku: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Error closing note:', error);
+      Alert.alert('Chyba', 'Nepodařilo se uzavřít poznámku');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reopenNote = async () => {
+    if (!osmAccessToken) {
+      Alert.alert('Chyba', 'Pro znovuotevření poznámky je potřeba OSM autorizace');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const reopenText = `Poznámka znovu otevřena prostřednictvím FodyApp\n\nvia FodyApp version 1.1.5`;
+      const url = `${OSM_NOTES_API}/${note.id}/reopen.json`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Bearer ${osmAccessToken}`,
+        },
+        body: `text=${encodeURIComponent(reopenText)}`,
+      });
+
+      if (response.ok) {
+        Alert.alert('Úspěch', 'Poznámka byla znovu otevřena');
+        fetchNoteDetails(note.id);
+        onRefresh && onRefresh();
+      } else {
+        const errorText = await response.text();
+        Alert.alert('Chyba', `Nepodařilo se znovu otevřít poznámku: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Error reopening note:', error);
+      Alert.alert('Chyba', 'Nepodařilo se znovu otevřít poznámku');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // If we just have a location, show create note form
+  if (!note && location) {
+    return (
+      <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" transparent>
+        <View style={styles.noteModalOverlay}>
+          <View style={styles.noteModalContent}>
+            <View style={styles.noteModalHeader}>
+              <Text style={styles.noteModalTitle}>{Icons.note} Nová OSM poznámka</Text>
+              <TouchableOpacity onPress={onClose}>
+                <Text style={styles.noteModalClose}>{Icons.close}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.noteModalLocation}>
+              {Icons.location} {location?.latitude?.toFixed(6)}, {location?.longitude?.toFixed(6)}
+            </Text>
+
+            <TextInput
+              style={styles.noteModalInput}
+              placeholder="Napište poznámku pro mapery OSM..."
+              value={noteText}
+              onChangeText={setNoteText}
+              multiline
+              numberOfLines={4}
+              placeholderTextColor={COLORS.textSecondary}
+            />
+
+            <View style={styles.noteModalInfo}>
+              <Text style={styles.noteModalInfoText}>
+                {Icons.info} Pro vytváření OSM poznámek není potřeba autorizace.
+                Pro správu poznámek (komentáře, uzavření) je nutné přihlášení přes OSM.
+              </Text>
+            </View>
+
+            <View style={styles.noteModalButtons}>
+              <Button
+                title="Zrušit"
+                variant="outline"
+                onPress={onClose}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <Button
+                title={submitting ? 'Odesílám...' : 'Vytvořit poznámku'}
+                onPress={createNote}
+                loading={submitting}
+                disabled={!noteText.trim()}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  // Show note details with actions
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{Icons.note} OSM Poznámka #{note?.id}</Text>
+          <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
+            <Text style={styles.modalCloseText}>{Icons.close}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.modalContent} contentContainerStyle={{ padding: 16 }}>
+          {loadingNote ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+              <Text style={styles.loadingText}>Načítám poznámku...</Text>
+            </View>
+          ) : noteDetails ? (
+            <>
+              {/* Note Status */}
+              <Card style={styles.noteStatusCard}>
+                <View style={styles.noteStatusRow}>
+                  <Badge 
+                    text={noteDetails.properties?.status === 'open' ? 'Otevřená' : 'Uzavřená'} 
+                    variant={noteDetails.properties?.status === 'open' ? 'warning' : 'success'} 
+                  />
+                  <Text style={styles.noteDateText}>
+                    Vytvořeno: {new Date(noteDetails.properties?.date_created).toLocaleDateString('cs-CZ')}
+                  </Text>
+                </View>
+              </Card>
+
+              {/* Note Comments */}
+              <Text style={styles.noteSectionTitle}>Komentáře</Text>
+              {noteDetails.properties?.comments && noteDetails.properties.comments.length > 0 ? (
+                noteDetails.properties.comments.map((comment, index) => (
+                  <Card key={index} style={styles.noteCommentCard}>
+                    <View style={styles.noteCommentHeader}>
+                      <Text style={styles.noteCommentUser}>{comment.user || 'Anonymní'}</Text>
+                      <Text style={styles.noteCommentDate}>
+                        {new Date(comment.date).toLocaleDateString('cs-CZ')}
+                      </Text>
+                    </View>
+                    <Text style={styles.noteCommentText}>{comment.text}</Text>
+                  </Card>
+                ))
+              ) : (
+                <Text style={styles.noCommentsText}>Žádné komentáře</Text>
+              )}
+
+              {/* Actions for OSM logged in users */}
+              {isOsmLoggedIn && osmAccessToken ? (
+                <View style={styles.noteActionsContainer}>
+                  <Text style={styles.noteSectionTitle}>Akce</Text>
+                  
+                  {/* Comment Tab */}
+                  <View style={styles.noteActionTabs}>
+                    <TouchableOpacity 
+                      style={[styles.noteActionTab, activeTab === 'comment' && styles.noteActionTabActive]}
+                      onPress={() => setActiveTab('comment')}
+                    >
+                      <Text style={[styles.noteActionTabText, activeTab === 'comment' && styles.noteActionTabTextActive]}>
+                        Přidat komentář
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    {noteDetails.properties?.status === 'open' ? (
+                      <TouchableOpacity 
+                        style={[styles.noteActionTab, activeTab === 'close' && styles.noteActionTabActive]}
+                        onPress={() => setActiveTab('close')}
+                      >
+                        <Text style={[styles.noteActionTabText, activeTab === 'close' && styles.noteActionTabTextActive]}>
+                          Uzavřít poznámku
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity 
+                        style={[styles.noteActionTab, activeTab === 'reopen' && styles.noteActionTabActive]}
+                        onPress={() => setActiveTab('reopen')}
+                      >
+                        <Text style={[styles.noteActionTabText, activeTab === 'reopen' && styles.noteActionTabTextActive]}>
+                          Znovu otevřít
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {activeTab === 'comment' && (
+                    <View style={styles.noteActionContent}>
+                      <TextInput
+                        style={styles.noteModalInput}
+                        placeholder="Napište komentář..."
+                        value={commentText}
+                        onChangeText={setCommentText}
+                        multiline
+                        numberOfLines={3}
+                        placeholderTextColor={COLORS.textSecondary}
+                      />
+                      <Button
+                        title={submitting ? 'Odesílám...' : 'Přidat komentář'}
+                        onPress={addComment}
+                        loading={submitting}
+                        disabled={!commentText.trim()}
+                        style={{ marginTop: 8 }}
+                      />
+                    </View>
+                  )}
+
+                  {activeTab === 'close' && (
+                    <View style={styles.noteActionContent}>
+                      <Text style={styles.noteActionConfirmText}>
+                        Opravdu chcete uzavřít tuto poznámku?
+                      </Text>
+                      <Button
+                        title={submitting ? 'Uzavírám...' : 'Ano, uzavřít poznámku'}
+                        variant="danger"
+                        onPress={closeNote}
+                        loading={submitting}
+                        style={{ marginTop: 8 }}
+                      />
+                    </View>
+                  )}
+
+                  {activeTab === 'reopen' && (
+                    <View style={styles.noteActionContent}>
+                      <Text style={styles.noteActionConfirmText}>
+                        Opravdu chcete znovu otevřít tuto poznámku?
+                      </Text>
+                      <Button
+                        title={submitting ? 'Otvírám...' : 'Ano, znovu otevřít'}
+                        onPress={reopenNote}
+                        loading={submitting}
+                        style={{ marginTop: 8 }}
+                      />
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Card style={styles.noteLoginPromptCard}>
+                  <Text style={styles.noteLoginPromptText}>
+                    {Icons.info} Pro komentování a správu poznámek se přihlaste přes OpenStreetMap.
+                  </Text>
+                </Card>
+              )}
+            </>
+          ) : (
+            <Text style={styles.errorText}>Nepodařilo se načíst poznámku</Text>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// OSM Note Add Modal (keep for backward compatibility)
 const AddOSMNoteModal = ({ visible, location, onClose, onSuccess }) => {
   const [noteText, setNoteText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -3209,7 +4011,7 @@ const FodyTab = ({ onNavigateToMapUpload, settings, onSettingsChange }) => {
 
 // MAPA TAB - OSM mapa s moznosti nahrávání, polohou uzivatele a rozcesniky
 const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadComplete, settings }) => {
-  const { isLoggedIn, login } = useAuth();
+  const { isLoggedIn, login, osmAccessToken, isOsmLoggedIn, loginWithOsm, logoutOsm } = useAuth();
   const { awardPoints, unlockAchievement, checkTask, gamificationEnabled } = useGamification();
   
   const webViewRef = useRef(null);
@@ -3233,6 +4035,7 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
   // Note modal
   const [addNoteModalVisible, setAddNoteModalVisible] = useState(false);
   const [noteLocation, setNoteLocation] = useState(null);
+  const [selectedOsmNote, setSelectedOsmNote] = useState(null);
 
   // Extended popup modal
   const [extendedPopupVisible, setExtendedPopupVisible] = useState(false);
@@ -3778,9 +4581,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
           var firstComment = props.comments && props.comments[0] ? props.comments[0].text : 'Bez popisu';
           var popupContent = '<div class="popup-title">OSM Note #' + props.id + '</div>' +
             '<div class="popup-info">Stav: ' + (isOpen ? 'Otevřená' : 'Uzavřená') + '</div>' +
-            '<div class="popup-tags">' + firstComment.substring(0, 100) + (firstComment.length > 100 ? '...' : '') + '</div>';
-          
+            '<div class="popup-tags">' + firstComment.substring(0, 100) + (firstComment.length > 100 ? '...' : '') + '</div>' +
+            '<button class="popup-note-btn" onclick="window.viewNote(' + props.id + ')">Zobrazit poznámku</button>';
+
           marker.bindPopup(popupContent);
+          
+          marker.on('click', function() {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'viewNote',
+              noteId: props.id
+            }));
+          });
+          
           noteMarkers.push(marker);
         }
       });
@@ -3980,7 +4792,19 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         }
       } else if (data.type === 'addNote') {
         setNoteLocation({ latitude: data.lat, longitude: data.lon });
+        setSelectedOsmNote(null);
         setAddNoteModalVisible(true);
+      } else if (data.type === 'viewNote') {
+        // Find the note and show details
+        const note = osmNotes.find(n => n.properties?.id === data.noteId);
+        if (note) {
+          setSelectedOsmNote(note.properties);
+          setNoteLocation({ 
+            latitude: note.geometry.coordinates[1], 
+            longitude: note.geometry.coordinates[0] 
+          });
+          setAddNoteModalVisible(true);
+        }
       } else if (data.type === 'layerError') {
         Alert.alert(
           'Chyba vrstvy',
@@ -4256,12 +5080,18 @@ const MapTab = ({ uploadMode: externalUploadMode, onLocationSelected, onUploadCo
         </View>
       )}
 
-      {/* Add OSM Note Modal */}
-      <AddOSMNoteModal
+      {/* Add OSM Note Modal - using enhanced OSMNoteModal */}
+      <OSMNoteModal
         visible={addNoteModalVisible}
+        note={selectedOsmNote}
         location={noteLocation}
-        onClose={() => setAddNoteModalVisible(false)}
-        onSuccess={() => fetchOSMNotes()}
+        onClose={() => {
+          setAddNoteModalVisible(false);
+          setSelectedOsmNote(null);
+        }}
+        onRefresh={() => fetchOSMNotes()}
+        isOsmLoggedIn={isOsmLoggedIn}
+        osmAccessToken={osmAccessToken}
       />
 
       {/* Extended Popup Modal */}
@@ -4633,7 +5463,7 @@ const MoreTab = ({ settings, onSettingsChange }) => {
           <Text style={styles.aboutLogo}>{Icons.camera}</Text>
           <View>
             <Text style={styles.aboutTitle}>Fody</Text>
-            <Text style={styles.aboutVersion}>Verze 1.1.5</Text>
+            <Text style={styles.aboutVersion}>Verze 1.1.5 - BETA</Text>
           </View>
         </View>
         
@@ -4816,6 +5646,12 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const [userProfileVisible, setUserProfileVisible] = useState(false);
+  
+  // OSM OAuth state
+  const [osmAccessToken, setOsmAccessToken] = useState(null);
+  const [isOsmLoggedIn, setIsOsmLoggedIn] = useState(false);
+  const [osmUser, setOsmUser] = useState(null);
+  
   const [settings, setSettings] = useState({
     photoLimit: 160,
     customTileUrl: '',
@@ -4827,6 +5663,170 @@ export default function App() {
   });
   const [appStartTime] = useState(new Date());
   const [deviceId, setDeviceId] = useState(null);
+
+  // Check and restore session on app start
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      try {
+        // Try to restore Fody session
+        const savedUser = await AsyncStorage.getItem('fodyUser');
+        if (savedUser) {
+          // Verify session is still valid
+          const response = await fetch(`${FODY_API_BASE}/api.php?cmd=logged`, {
+            credentials: 'include',
+          });
+          if (response.ok) {
+            const username = await response.text();
+            const actualUser = username.trim() || savedUser;
+            setUser(actualUser);
+            setIsLoggedIn(true);
+            await AsyncStorage.setItem('fodyUser', actualUser);
+          } else {
+            // Session expired, clear saved user
+            await AsyncStorage.removeItem('fodyUser');
+          }
+        }
+        
+        // Restore OSM OAuth session
+        const savedOsmToken = await AsyncStorage.getItem('osmAccessToken');
+        const savedOsmUser = await AsyncStorage.getItem('osmUser');
+        if (savedOsmToken && savedOsmUser) {
+          // Verify token is still valid by fetching user details
+          try {
+            const userResponse = await fetch(`${OSM_API_BASE_URL}/user/details`, {
+              headers: {
+                'Authorization': `Bearer ${savedOsmToken}`,
+              },
+            });
+            if (userResponse.ok) {
+              setOsmAccessToken(savedOsmToken);
+              setOsmUser(savedOsmUser);
+              setIsOsmLoggedIn(true);
+            } else {
+              // Token expired, clear saved session
+              await AsyncStorage.removeItem('osmAccessToken');
+              await AsyncStorage.removeItem('osmUser');
+            }
+          } catch (e) {
+            console.error('Error verifying OSM token:', e);
+            await AsyncStorage.removeItem('osmAccessToken');
+            await AsyncStorage.removeItem('osmUser');
+          }
+        }
+      } catch (error) {
+        console.error('Error restoring session:', error);
+      }
+    };
+
+    checkExistingSession();
+  }, []);
+
+  // Handle deep linking for OAuth callback
+  useEffect(() => {
+    const handleDeepLink = (event) => {
+      const url = event.url;
+      if (url && url.startsWith('fodyapp://oauth/callback')) {
+        // Parse the OAuth callback URL
+        handleOAuthCallback(url);
+      }
+    };
+
+    // Add listener for deep links
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+    
+    // Check if app was opened with a deep link
+    Linking.getInitialURL().then((url) => {
+      if (url && url.startsWith('fodyapp://oauth/callback')) {
+        handleOAuthCallback(url);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const handleOAuthCallback = async (url) => {
+    try {
+      const { code, error } = parseOAuthCallback(url);
+
+      if (error) {
+        Alert.alert('Chyba OAuth', error);
+        return;
+      }
+
+      if (code) {
+        // Exchange code for token using OSM OAuth
+        // Note: In production, exchange should be done server-side to protect client_secret
+        // For this app, we'll use the resource owner password flow or device flow as fallback
+        
+        // Try to exchange the code for a token
+        // Since we can't safely store client_secret in the app, we'll use a different approach:
+        // 1. Use the authorization code with a backend (recommended)
+        // 2. Or use resource owner password credentials (not recommended for OSM)
+        // 3. Or use device flow for mobile apps
+        
+        // For now, store the auth code and show instructions to user
+        // In a production app, you'd have a backend service handle this
+        
+        Alert.alert(
+          'OAuth Autorizace',
+          'Autorizace proběhla úspěšně. Pro dokončení přihlášení je potřeba server-side token exchange.\n\nDočasně uloženo - kontaktujte správce pro dokončení nastavení.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Store the code for later exchange (in production, send to your backend)
+                AsyncStorage.setItem('osmOAuthCode', code);
+              }
+            }
+          ]
+        );
+        
+        // Alternative: Use OSM's API directly with the code (requires proper setup)
+        // This would typically go through your own backend
+        /*
+        const tokenResponse = await fetch(OSM_OAUTH_TOKEN_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `grant_type=authorization_code&code=${code}&client_id=${OSM_OAUTH_CLIENT_ID}&client_secret=${OSM_OAUTH_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(OSM_OAUTH_REDIRECT_URI)}`,
+        });
+        
+        if (tokenResponse.ok) {
+          const tokenData = await tokenResponse.json();
+          const accessToken = tokenData.access_token;
+          
+          // Get user details
+          const userResponse = await fetch(`${OSM_API_BASE_URL}/user/details`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+          
+          if (userResponse.ok) {
+            const userXml = await userResponse.text();
+            const userMatch = userXml.match(/<user[^>]*display_name="([^"]+)"/);
+            const osmUsername = userMatch ? userMatch[1] : 'Unknown';
+            
+            // Store OSM session
+            setOsmAccessToken(accessToken);
+            setOsmUser(osmUsername);
+            setIsOsmLoggedIn(true);
+            await AsyncStorage.setItem('osmAccessToken', accessToken);
+            await AsyncStorage.setItem('osmUser', osmUsername);
+            
+            Alert.alert('Úspěch', `Přihlášen jako ${osmUsername}!`);
+          }
+        }
+        */
+      }
+    } catch (e) {
+      console.error('Error handling OAuth callback:', e);
+      Alert.alert('Chyba', 'Nepodařilo se dokončit OAuth autorizaci.');
+    }
+  };
 
   // Generuj či načti device ID a načti nastavení
   useEffect(() => {
@@ -4864,10 +5864,14 @@ export default function App() {
         hadUser: !!user,
         sessionDuration: new Date() - sessionStartTime,
       });
-      
+
       await fetch(`${AUTH_URL}?logout`, { credentials: 'include' });
       setUser(null);
       setIsLoggedIn(false);
+      
+      // Clear persisted session
+      await AsyncStorage.removeItem('fodyUser');
+      
       Alert.alert('Odhlášeno', 'Byli jste úspěšně odhlášeni.');
     } catch (error) {
       console.error('Chyba pri odhlaseni:', error);
@@ -4879,20 +5883,48 @@ export default function App() {
     setUser(username);
     setIsLoggedIn(true);
     setLoginModalVisible(false);
-    
+
+    // Persist session
+    AsyncStorage.setItem('fodyUser', username);
+
     // Gamification: Unlock achievements for logging in
     if (gamificationEnabled) {
       unlockAchievement('first_login');
       unlockAchievement('complete_profile');
     }
-    
+
     // Record login event
     recordEvent('osm_login_success', {
       usernameHash: createUserHash(username),
       method: 'oauth2',
     });
-    
+
     Alert.alert('Přihlášeno', `Vítejte, ${username}!`);
+  };
+
+  // OSM OAuth login function
+  const loginWithOsm = () => {
+    // Build OAuth authorization URL
+    const state = `fody_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const authUrl = `${OSM_OAUTH_AUTHORIZE_URL}?client_id=${OSM_OAUTH_CLIENT_ID}&redirect_uri=${encodeURIComponent(OSM_OAUTH_REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(OSM_OAUTH_SCOPES)}&state=${state}`;
+    
+    // Open authorization URL in browser/WebView
+    Linking.openURL(authUrl).catch(() => {
+      Alert.alert('Chyba', 'Nepodařilo se otevřít přihlašovací stránku');
+    });
+  };
+
+  // OSM OAuth logout function
+  const logoutOsm = async () => {
+    setOsmAccessToken(null);
+    setOsmUser(null);
+    setIsOsmLoggedIn(false);
+    
+    // Clear persisted OSM session
+    await AsyncStorage.removeItem('osmAccessToken');
+    await AsyncStorage.removeItem('osmUser');
+    
+    Alert.alert('Odhlášeno', 'Byli jste odhlášeni z OSM účtu.');
   };
 
   const navigateToMapUpload = () => {
@@ -5210,7 +6242,7 @@ useEffect(() => {
 
   return (
     <GamificationProvider>
-      <AuthContext.Provider value={{ user, isLoggedIn, login, logout }}>
+      <AuthContext.Provider value={{ user, isLoggedIn, login, logout, osmAccessToken, isOsmLoggedIn, osmUser, loginWithOsm, logoutOsm }}>
         <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor={COLORS.surface} />
         
@@ -6292,6 +7324,7 @@ const styles = StyleSheet.create({
   // Upload
   uploadContainer: {
     flex: 1,
+
   },
   uploadContent: {
     padding: 12,
@@ -7519,5 +8552,213 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: COLORS.primary,
     borderRadius: 2,
+  },
+
+  // Fullscreen Photo Zoom
+  fullscreenPhotoImageContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  resetZoomBtn: {
+    padding: 4,
+  },
+  resetZoomText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  zoomIndicator: {
+    position: 'absolute',
+    bottom: 100,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  zoomIndicatorText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  zoomHint: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+  },
+
+  // OSM Note Modal Styles
+  noteStatusCard: {
+    marginBottom: 16,
+  },
+  noteStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  noteDateText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  noteSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  noteCommentCard: {
+    marginBottom: 8,
+  },
+  noteCommentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  noteCommentUser: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  noteCommentDate: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  noteCommentText: {
+    fontSize: 13,
+    color: COLORS.text,
+    lineHeight: 18,
+  },
+  noCommentsText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: 16,
+  },
+  noteActionsContainer: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: 16,
+  },
+  noteActionTabs: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  noteActionTab: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.background,
+    marginRight: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  noteActionTabActive: {
+    backgroundColor: COLORS.primary,
+  },
+  noteActionTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  noteActionTabTextActive: {
+    color: '#FFFFFF',
+  },
+  noteActionContent: {
+    marginTop: 8,
+  },
+  noteActionConfirmText: {
+    fontSize: 14,
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  noteLoginPromptCard: {
+    backgroundColor: COLORS.primaryLight + '20',
+    marginTop: 16,
+  },
+  noteLoginPromptText: {
+    fontSize: 13,
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 14,
+    color: COLORS.error,
+    textAlign: 'center',
+    padding: 16,
+  },
+
+  // OSM Tags Edit Styles
+  tagsElementInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    padding: 8,
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+  },
+  tagsElementType: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  tagsTableEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  tagsTableEditInput: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    borderRadius: 4,
+    padding: 6,
+    fontSize: 12,
+    color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  tagsTableEditButtons: {
+    flexDirection: 'row',
+    marginLeft: 4,
+  },
+  tagsTableEditBtn: {
+    padding: 4,
+    marginHorizontal: 2,
+  },
+  tagsTableEditBtnText: {
+    fontSize: 14,
+  },
+  tagsTableActions: {
+    flexDirection: 'row',
+    marginLeft: 4,
+  },
+  tagsTableActionBtn: {
+    padding: 4,
+  },
+  tagsTableActionText: {
+    fontSize: 14,
+  },
+  tagsTableAddRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  tagsTableAddBtn: {
+    padding: 8,
+    alignItems: 'center',
+  },
+  tagsTableAddBtnText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '600',
   },
 });
