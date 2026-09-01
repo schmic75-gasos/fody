@@ -1,0 +1,1 @@
+Jediná data, která uchovává server Fody na adrese osm.fit.vutbr.cz, jsou uživatelské účty (přes OSM O2AUTH) a fotky, které uzivatel dobrovolně nahraje a vzdá se tím jistých autorských práv. Více na webu Fody.
